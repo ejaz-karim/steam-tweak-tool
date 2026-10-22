@@ -6,14 +6,24 @@
 #include "steam-tweak-tool/cloud_disable.hpp"
 #include "steam-tweak-tool/autoupdate_disable.hpp"
 #include "steam-tweak-tool/gameupdate_appmanifest_disable.hpp"
+#include "steam-tweak-tool/delete_cloud_data.hpp"
 #include "steam-tweak-tool/utility.hpp"
 
 using namespace std;
 
-int main()
+int main(int argc, char *argv[])
 {
+    // Worker mode: short-lived child spawned by option 4. Exits right after
+    // deleting, which ends the Steam app session and triggers the cloud sync.
+    if (argc >= 3 && string(argv[1]) == "--cloud-worker")
+    {
+        return runCloudWorker(argc, argv);
+    }
 #ifdef _WIN32
     SetConsoleTitleW(L"Steam Tweak Tool");
+    // Game names from appmanifests are UTF-8 (e.g. "Street Fighter™ 6");
+    // without this the console renders them with the legacy codepage.
+    SetConsoleOutputCP(CP_UTF8);
 #endif
 
 
@@ -31,7 +41,8 @@ int main()
             cout << ">Enter 1 to disable Steam Cloud for all games (per-game settings)" << endl;
             cout << ">Enter 2 to disable Auto-updates and Unschedule all game and Workshop updates" << endl;
             cout << ">Enter 3 to disable or enable Game updates" << endl;
-            cout << ">Enter 4 to exit" << endl;
+            cout << ">Enter 4 to delete Steam Cloud data (per-user)" << endl;
+            cout << ">Enter 5 to exit" << endl;
             cout << ">Select your option: " << endl;
             string input;
             cout << ">";
@@ -102,6 +113,11 @@ int main()
                 gameUpdateDisabler.run(libraryPaths);
             }
             else if (input == "4")
+            {
+                CloudDataDeleter cloudDataDeleter;
+                cloudDataDeleter.run(steamRoot, libraryPaths);
+            }
+            else if (input == "5")
             {
                 break;
             }
