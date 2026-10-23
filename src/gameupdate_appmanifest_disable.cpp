@@ -60,7 +60,6 @@ vector<pair<int, string>> GameUpdateDisabler::collectAppManifests(const vector<s
 void GameUpdateDisabler::printManifestList(const vector<pair<int, string>> &manifests)
 {
     FileUtility fileUtility;
-    cout << ">Appmanifest files found:" << endl;
     string lastDirectory;
     int number = 1;
     for (const auto &manifest : manifests)
@@ -69,7 +68,11 @@ void GameUpdateDisabler::printManifestList(const vector<pair<int, string>> &mani
         string directory = path.parent_path().string();
         if (directory != lastDirectory)
         {
-            cout << endl << ">Processing directory: " << directory << endl;
+            if (!lastDirectory.empty())
+            {
+                cout << endl;
+            }
+            cout << ">Processing directory: " << directory << endl;
             lastDirectory = directory;
         }
         bool readOnly = fileUtility.isFileReadOnly(manifest.second);
@@ -94,7 +97,6 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
             return;
         }
 
-        cout << endl;
         printManifestList(manifests);
         cout << ">Select the number of the appmanifest file: " << endl;
         cout << ">";

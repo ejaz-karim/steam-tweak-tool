@@ -2427,7 +2427,7 @@ bool writeOutput(const string &path, const string &text, size_t idCount)
     sharedConfigFile << text;
     sharedConfigFile.close();
     cout << ">Modified: " << path << endl;
-    cout << ">Cloud disabled for " << idCount << " games" << endl;
+    cout << ">Disabled cloud for " << idCount << " games" << endl << endl;
     return true;
 }
 }

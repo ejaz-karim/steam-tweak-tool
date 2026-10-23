@@ -21,8 +21,6 @@ int main(int argc, char *argv[])
     }
 #ifdef _WIN32
     SetConsoleTitleW(L"Steam Tweak Tool");
-    // Game names from appmanifests are UTF-8 (e.g. "Street Fighter™ 6");
-    // without this the console renders them with the legacy codepage.
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
