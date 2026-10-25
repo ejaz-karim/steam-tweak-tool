@@ -925,50 +925,55 @@ namespace
         return false;
     }
 
-    // Flips the FIRST "CloudEnabled" in the file from "0" to "1" in place.
-    // Only meaningful once the file is normalized (option 1 guarantees the
-    // global switch is the first "CloudEnabled" in the file). Returns true
-    // when the global switch is on afterwards (an already-on switch counts
-    // as success, callers check the value beforehand for exact diagnostics).
-    bool flipGlobalCloudSwitch(const string &sharedConfigPath)
+    // Flips EVERY "CloudEnabled" leaf in the file from "0" to "1" in place:
+    // the global switch inside the "Steam" block AND the per-game switch of
+    // every app in its "apps" {} block. Only meaningful on a normalized
+    // sharedconfig (option 1's writer emits exactly those switches as "0").
+    // Returns the number of switches flipped, 0 when they were already all on,
+    // or -1 when the file could not be read or written.
+    int enableCloudEverywhere(const string &sharedConfigPath)
     {
         try
         {
             string content = FileUtility().readFileContents(sharedConfigPath);
-            string value = extractVdfValue(content, "CloudEnabled");
-            if (value == "1")
-            {
-                return true;
-            }
-            if (value != "0")
-            {
-                return false;
-            }
             const size_t cloudKeyLen = sizeof("\"CloudEnabled\"") - 1; // 14
-            size_t keyPos = content.find("\"CloudEnabled\"");
-            if (keyPos == string::npos)
+            int flipped = 0;
+            size_t pos = 0;
+            while (true)
             {
-                return false;
+                size_t keyPos = content.find("\"CloudEnabled\"", pos);
+                if (keyPos == string::npos)
+                {
+                    break;
+                }
+                size_t valQ1 = content.find('"', keyPos + cloudKeyLen);
+                if (valQ1 == string::npos || valQ1 + 1 >= content.size())
+                {
+                    break;
+                }
+                if (content[valQ1 + 1] == '0')
+                {
+                    content[valQ1 + 1] = '1';
+                    flipped++;
+                }
+                pos = valQ1 + 2;
             }
-            size_t valQ1 = content.find('"', keyPos + cloudKeyLen);
-            if (valQ1 == string::npos || valQ1 + 1 >= content.size() ||
-                content[valQ1 + 1] != '0')
+            if (flipped == 0)
             {
-                return false;
+                return 0;
             }
-            content[valQ1 + 1] = '1';
             ofstream outFile(sharedConfigPath, ios::trunc | ios::binary);
             if (!outFile)
             {
-                return false;
+                return -1;
             }
             outFile << content;
-            return true;
+            return flipped;
         }
         catch (const exception &e)
         {
             cout << ">Error: could not update sharedconfig.vdf: " << e.what() << endl;
-            return false;
+            return -1;
         }
     }
 
@@ -977,8 +982,8 @@ namespace
     //   * normally: graceful "steam.exe -shutdown", and if the client ignores
     //     it, force-closes Steam with taskkill (the reference Steam Cloud File
     //     Manager's approach); after the exit, a normalized sharedconfig whose
-    //     path is passed in fixSharedConfig gets the global switch re-applied
-    //     if Steam reverted it with its old in-memory value on exit;
+    //     path is passed in fixSharedConfig gets its cloud switches (global and
+    //     per-game) re-applied if Steam reverted them on exit;
     //   * with preserveDiskEdits (used after deletions + option 1/2 cleanup):
     //     skips the graceful shutdown entirely and force-closes right away,
     //     because Steam's in-memory state IS the stale state those files just
@@ -1059,30 +1064,22 @@ namespace
             }
         }
 
-        // Steam rewrites its config files on exit and can flip the global
-        // switch back off with its old in-memory value; fix it up.
+        // Steam rewrites its config files on exit and can flip the cloud
+        // switches back off with its old in-memory values; fix them all up.
         if (!fixSharedConfig.empty())
         {
-            try
+            int reEnabled = enableCloudEverywhere(fixSharedConfig);
+            if (reEnabled > 0)
             {
-                string check = FileUtility().readFileContents(fixSharedConfig);
-                if (extractVdfValue(check, "CloudEnabled") == "0")
-                {
-                    cout << ">Steam re-applied its old global setting on exit; turning it" << endl;
-                    cout << ">back on (the file is already normalized)..." << endl;
-                    if (flipGlobalCloudSwitch(fixSharedConfig))
-                    {
-                        cout << ">Global switch re-applied successfully." << endl;
-                    }
-                    else
-                    {
-                        cout << ">Could not re-apply the global switch: enable it manually in" << endl;
-                        cout << ">Steam -> Settings -> Cloud after Steam restarts." << endl;
-                    }
-                }
+                cout << ">Steam re-applied its old cloud settings on exit; turning them" << endl;
+                cout << ">back on globally and for every game (the file is already" << endl;
+                cout << ">normalized)..." << endl;
+                cout << ">Cloud switches re-applied successfully." << endl;
             }
-            catch (const exception &)
+            else if (reEnabled < 0)
             {
+                cout << ">Could not re-apply the cloud switches: enable Steam Cloud" << endl;
+                cout << ">manually in Steam -> Settings -> Cloud after Steam restarts." << endl;
             }
         }
         return startAndAwaitLogon();
@@ -1312,8 +1309,8 @@ namespace
     // "CloudEnabled" off), so the caller must NOT loop back into the cloud
     // game list afterwards: a fresh list would let further deletions queue
     // but never upload. It returns false when the user skipped the cleanup -
-    // the global switch still has whatever value deletion required (on), so
-    // looping straight back to the list is safe there.
+    // cloud is still set up the way option 4 left it (global and every game
+    // switch on), so looping straight back to the list is safe there.
     bool postDeletionFollowUp(const string &steamRoot, const string &userId,
                               const string &personaName, const vector<string> &libraryPaths)
     {
@@ -1323,12 +1320,12 @@ namespace
         cout << ">If the file still shows there, delete it again with option 4 and keep" << endl;
         cout << ">retrying until it no longer appears - it will eventually stay deleted." << endl;
         cout << ">Also check that Steam Cloud is enabled globally in the Steam settings;" << endl;
-        cout << ">while it is off, deletions are queued but never uploaded." << endl;
+        cout << ">If the cloud file does not delete, manually resync the cloud files by pressing play (cloud conflict will occur, choose cloud over local save file), and try deleting again." << endl;
 
         cout << endl;
         cout << ">Deleting cloud data queues an update for this game and re-enables its" << endl;
         cout << ">per-game Steam Cloud setting. Run option 1 (disable per-game cloud) and" << endl;
-        cout << ">then option 2 (disable auto-updates) now, in one go?" << endl;
+        cout << ">then option 2 (disable auto-updates) now, in one go? (Will restart Steam)" << endl;
         cout << ">Enter 1 for yes, anything else to skip: " << endl;
         cout << ">";
         string cleanupInput;
@@ -1363,8 +1360,8 @@ namespace
     // Explains why the loop must end after a cleanup instead of showing the
     // cloud game list again: the cleanup left Steam Cloud off GLOBALLY, so
     // the list would be a trap (deletions queue but never upload). Returning
-    // to the main menu means the next option 4 entry re-runs the global-cloud
-    // pre-flight, which re-enables the switch and restarts Steam first.
+    // to the main menu means the next option 4 entry re-runs the cloud setup,
+    // which re-enables every switch and restarts Steam first.
     void returnToMainMenuAfterCleanup()
     {
         cout << endl;
@@ -1372,7 +1369,8 @@ namespace
         cout << ">deleting until it is re-enabled - staying in the game list here would" << endl;
         cout << ">leave further deletions queued but never uploaded." << endl;
         cout << ">Returning to the main menu. The next option 4 run re-enables Steam" << endl;
-        cout << ">Cloud and restarts Steam automatically before showing the list again." << endl;
+        cout << ">Cloud globally and for every game, then restarts Steam automatically" << endl;
+        cout << ">before showing the list again." << endl;
     }
 #endif
 } // namespace
@@ -1579,67 +1577,57 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         return;
     }
 
-    // The account-level (global) cloud switch lives in sharedconfig.vdf as the
-    // "CloudEnabled" leaf inside the "Steam" block - NOT the per-game ones in
-    // the "apps" {}. Per-game entries can stay off and option 4 still works;
-    // only the GLOBAL switch gates uploads. If it is off, the client logs
-    // "Sync Disabled" and queues deletions without ever uploading them
-    // (observed in logs/cloud_log.txt).
-    // Note: extractVdfValue returns the FIRST occurrence in the file, which
-    // only equals the global switch after option 1's writer has normalized the
-    // file - so run that normalizer first whenever the first value reads "0".
+    // Steam Cloud has to be ON both globally (the "CloudEnabled" leaf inside
+    // sharedconfig.vdf's "Steam" block) and per game (one "CloudEnabled" per
+    // app in that block's "apps" {}). If either is off the client queues
+    // deletions without ever uploading them (observed in logs/cloud_log.txt)
+    // or holds a local pending state it never syncs (cloud desync).
+    //
+    // The whole setup therefore runs on EVERY option 4 entry, unconditionally:
+    // top-level option 1 normalizes sharedconfig.vdf (its writer emits every
+    // switch as "0"), all switches are then flipped back to "1" - global and
+    // per game - and Steam is restarted so it re-reads them. Checking only the
+    // global switch first would miss the file state this is meant to prevent:
+    // global on, every per-game switch off.
     string sharedConfigPath = userDataPath + "/7/remote/sharedconfig.vdf";
     if (fs::exists(sharedConfigPath))
     {
-        FileUtility fileUtility;
-        bool globalCloudWasOff = false;
-        try
-        {
-            string sharedConfig = fileUtility.readFileContents(sharedConfigPath);
-            globalCloudWasOff = extractVdfValue(sharedConfig, "CloudEnabled") == "0";
-        }
-        catch (const exception &)
-        {
-        }        if (globalCloudWasOff)
-        {
-            cout << ">Steam Cloud is disabled GLOBALLY (Steam -> Settings -> Cloud)." << endl;
-            cout << ">Option 4 cannot work while it is off: deletions are queued by Steam" << endl;
-            cout << ">but never uploaded. Enabling it now..." << endl;
-            cout << endl;
-            cout << ">Running the real top-level option 1 first (all libraries, all users):" << endl;
-            cout << ">this normalizes sharedconfig.vdf so the global switch sits at the top" << endl;
-            cout << ">of the \"Steam\" block, and leaves per-game cloud disabled." << endl;
-            cout << endl;
-            runTopLevelOptionOne(steamRoot, libraryPaths);
+        cout << ">Preparing Steam Cloud: deletions only sync while cloud is enabled" << endl;
+        cout << ">globally and for the game, so both are set up now, every run." << endl;
+        cout << endl;
+        cout << ">Running the real top-level option 1 first (all libraries, all users):" << endl;
+        cout << ">this normalizes sharedconfig.vdf and writes every cloud switch as off." << endl;
+        cout << endl;
+        runTopLevelOptionOne(steamRoot, libraryPaths);
 
-            // The file is now canonical, so the FIRST "CloudEnabled" in this
-            // user's file is the global switch. Flip its value "0" -> "1" in place.
-            if (!flipGlobalCloudSwitch(sharedConfigPath))
-            {
-                cout << ">Could not enable Steam Cloud automatically. Please turn it on" << endl;
-                cout << ">manually in Steam -> Settings -> Cloud, restart Steam, and run" << endl;
-                cout << ">option 4 again." << endl;
-                return;
-            }
-            cout << ">Global Steam Cloud re-enabled (per-game cloud stays off)." << endl;
-
-            // Steam only re-reads this setting at startup, so bounce the client
-            // right here instead of making the user press option 4 twice.
-#ifdef _WIN32
-            if (!restartSteamAutomatically(steamRoot, userId, personaName, sharedConfigPath,
-                                           /*preserveDiskEdits*/ false))
-            {
-                return;
-            }
-#else
-            cout << endl;
-            cout << ">Restart Steam manually for the new setting to take effect, then run" << endl;
+        // The file is now canonical: the first "CloudEnabled" is the global
+        // switch and every app entry holds a per-game one, all written as "0".
+        cout << ">Turning Steam Cloud back on globally and for every game..." << endl;
+        if (enableCloudEverywhere(sharedConfigPath) < 0)
+        {
+            cout << ">Could not enable Steam Cloud automatically. Please turn it on" << endl;
+            cout << ">manually in Steam -> Settings -> Cloud, restart Steam, and run" << endl;
             cout << ">option 4 again." << endl;
             return;
-#endif
-            // Steam is back up with the global switch in effect - fall through
-            // straight to the cloud game list instead of the main menu.
         }
+        cout << ">Steam Cloud is enabled globally and for every game." << endl;
+
+        // Steam only re-reads these settings at startup, so bounce the client
+        // right here instead of making the user press option 4 twice.
+#ifdef _WIN32
+        if (!restartSteamAutomatically(steamRoot, userId, personaName, sharedConfigPath,
+                                       /*preserveDiskEdits*/ false))
+        {
+            return;
+        }
+#else
+        cout << endl;
+        cout << ">Restart Steam manually for the new settings to take effect, then run" << endl;
+        cout << ">option 4 again." << endl;
+        return;
+#endif
+        // Steam is back up with the global and per-game switches in effect -
+        // fall through to the cloud game list instead of the main menu.
     }
 
     map<int, string> manifests = buildManifestMap(libraryPaths);

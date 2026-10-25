@@ -77,7 +77,7 @@ void GameUpdateDisabler::printManifestList(const vector<pair<int, string>> &mani
         }
         bool readOnly = fileUtility.isFileReadOnly(manifest.second);
         cout << ">" << number << ". ["
-             << (readOnly ? "READ-ONLY" : "WRITABLE")
+             << (readOnly ? "DISABLED/READ-ONLY" : "ENABLED/WRITABLE")
              << "] " << path.filename().string() << endl;
         number++;
     }
@@ -105,12 +105,12 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
         {
             return;
         }
-        cout << endl;
 
         if (input == "0")
         {
             return;
         }
+        cout << endl;
 
         int choice = 0;
         try
@@ -135,8 +135,8 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
         bool currentlyReadOnly = fileUtility.isFileReadOnly(filePath);
         cout << ">" << filename << " is currently: "
              << (currentlyReadOnly ? "READ-ONLY" : "WRITABLE") << endl;
-        cout << ">Enter 1 to disable game updates (set read-only)" << endl;
-        cout << ">Enter 2 to enable game updates (remove read-only)" << endl;
+        cout << ">Enter 1 to Disable game updates (set read-only)" << endl;
+        cout << ">Enter 2 to Enable game updates (set writable)" << endl;
         cout << ">Enter 0 to cancel" << endl;
         cout << ">";
         string action;
@@ -160,7 +160,7 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
                 bool nowReadOnly = fileUtility.isFileReadOnly(filePath);
                 cout << ">" << filename << " is now "
                      << (nowReadOnly ? "READ-ONLY (game updates disabled)"
-                                     : "WRITABLE (game updates enabled)") << endl;
+                                     : "WRITABLE (game updates enabled)") << endl << endl;
             }
             else
             {

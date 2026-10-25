@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
             cout << ">Enter 1 to disable Steam Cloud for all games (per-game settings)" << endl;
             cout << ">Enter 2 to disable Auto-updates and Unschedule all game and Workshop updates" << endl;
             cout << ">Enter 3 to disable or enable Game updates" << endl;
-            cout << ">Enter 4 to delete Steam Cloud data (per-user)" << endl;
+            cout << ">Enter 4 to delete Steam Cloud data (per-user) [Restarts Steam + Runs option 1]" << endl;
             cout << ">Enter 5 to exit" << endl;
             cout << ">Select your option: " << endl;
             string input;
