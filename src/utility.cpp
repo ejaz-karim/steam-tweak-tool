@@ -28,24 +28,39 @@ string FileUtility::readFileContents(const string &filePath)
     return buffer.str();
 }
 
-// Get all game ids from the appmanifest .acf file names in /steamapps/
 vector<int> FileUtility::getAcfID(const string &path)
 {
     vector<int> intVector;
     for (const auto &entry : filesystem::directory_iterator(path))
     {
+        if (!entry.is_regular_file())
+        {
+            continue;
+        }
         if (entry.path().extension() == ".acf")
         {
             string filename = entry.path().filename().string();
-            // Only appmanifest files are parsed, e.g. appmanifest_440.acf
+
             if (filename.rfind("appmanifest_", 0) == 0)
             {
-                // erasing appmanifest_
-                filename.erase(0, 12);
-                // erasing .acf
-                filename.erase(filename.size() - 4);
-
-                intVector.push_back(stoi(filename));
+                size_t start = 12;
+                size_t end = filename.size() - 4;
+                if (end <= start)
+                {
+                    continue;
+                }
+                string appIdText = filename.substr(start, end - start);
+                if (appIdText.find_first_not_of("0123456789") != string::npos)
+                {
+                    continue;
+                }
+                try
+                {
+                    intVector.push_back(stoi(appIdText));
+                }
+                catch (const exception &)
+                {
+                }
             }
         }
     }
@@ -141,7 +156,7 @@ string FileUtility::promptSteamRoot()
 string FileUtility::resolveSteamRoot()
 {
     string root;
-    // 1. Saved config takes priority
+
     string saved = loadSteamRoot();
     if (!saved.empty() && filesystem::is_regular_file(saved + "/steam.exe"))
     {
@@ -150,7 +165,7 @@ string FileUtility::resolveSteamRoot()
     }
     else
     {
-        // 2. Check default Windows path
+
         string defaultPath = "C:/Program Files (x86)/Steam";
         if (filesystem::is_regular_file(defaultPath + "/steam.exe"))
         {
@@ -159,7 +174,7 @@ string FileUtility::resolveSteamRoot()
         }
         else
         {
-            // 3. Prompt the user
+
             cout << ">Could not find Steam root folder" << endl;
             root = promptSteamRoot();
             if (root.empty())
@@ -304,8 +319,7 @@ bool FileUtility::setFileReadOnly(const string &filePath, bool readOnly)
     }
     DWORD newAttributes = readOnly ? (attributes | FILE_ATTRIBUTE_READONLY)
                                    : (attributes & ~static_cast<DWORD>(FILE_ATTRIBUTE_READONLY));
-    // Always call SetFileAttributesW so the operation is applied even when the
-    // attribute already appears to be in the requested state.
+
     return SetFileAttributesW(path.c_str(), newAttributes) != 0;
 #else
     error_code ec;

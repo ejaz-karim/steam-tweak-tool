@@ -13,17 +13,20 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
-    // Worker mode: short-lived child spawned by option 4. Exits right after
-    // deleting, which ends the Steam app session and triggers the cloud sync.
+
     if (argc >= 3 && string(argv[1]) == "--cloud-worker")
     {
         return runCloudWorker(argc, argv);
+    }
+
+    if (argc >= 4 && string(argv[1]) == "--cloud-sync")
+    {
+        return runCloudSyncWorker(argc, argv);
     }
 #ifdef _WIN32
     SetConsoleTitleW(L"Steam Tweak Tool");
     SetConsoleOutputCP(CP_UTF8);
 #endif
-
 
     try
     {
@@ -32,6 +35,7 @@ int main(int argc, char *argv[])
         string userDataPath = steamRoot + "/userdata";
         vector<string> libraryPaths = fileUtility.parseLibraryFolders(steamRoot);
 
+
         while (true)
         {
             cout << endl;
@@ -39,7 +43,7 @@ int main(int argc, char *argv[])
             cout << ">Enter 1 to disable Steam Cloud for all games (per-game settings)" << endl;
             cout << ">Enter 2 to disable Auto-updates and Unschedule all game and Workshop updates" << endl;
             cout << ">Enter 3 to disable or enable Game updates" << endl;
-            cout << ">Enter 4 to delete Steam Cloud data (per-user) [Restarts Steam + Runs option 1]" << endl;
+            cout << ">Enter 4 to delete Steam Cloud data (per-user) [Restarts Steam in debug mode + Runs option 1]" << endl;
             cout << ">Enter 5 to exit" << endl;
             cout << ">Select your option: " << endl;
             string input;
@@ -65,11 +69,20 @@ int main(int argc, char *argv[])
                     continue;
                 }
                 vector<int> combinedAcfIds;
+                bool libraryReadFailed = false;
                 for (const string& lib : libraryPaths) {
                     string sAppsPath = lib + "/steamapps";
                     if (filesystem::exists(sAppsPath)) {
-                        vector<int> ids = fileUtility.getAcfID(sAppsPath);
-                        combinedAcfIds.insert(combinedAcfIds.end(), ids.begin(), ids.end());
+                        try
+                        {
+                            vector<int> ids = fileUtility.getAcfID(sAppsPath);
+                            combinedAcfIds.insert(combinedAcfIds.end(), ids.begin(), ids.end());
+                        }
+                        catch (const exception &e)
+                        {
+                            cerr << ">Error: could not read " << sAppsPath << ": " << e.what() << endl;
+                            libraryReadFailed = true;
+                        }
                     }
                 }
 
@@ -81,29 +94,63 @@ int main(int argc, char *argv[])
                 }
                 
                 CloudDisabler cloudDisabler;
-                cloudDisabler.iterateSharedConfig(userDataPath, acfIds);
-                cout << ">Success" << endl;
+                if (cloudDisabler.iterateSharedConfig(userDataPath, acfIds) && !libraryReadFailed)
+                {
+                    cout << ">Success" << endl;
+                }
+                else
+                {
+                    cout << ">Could not update every user's sharedconfig.vdf (or none was found)." << endl;
+                }
             }
             else if (input == "2")
             {
                 bool foundAny = false;
+                bool anyGames = false;
+                bool allOk = true;
                 AutoUpdateDisabler autoUpdateDisabler;
                 
                 for (const string& lib : libraryPaths) {
                     string sAppsPath = lib + "/steamapps";
                     if (filesystem::exists(sAppsPath)) {
                         cout << ">Processing directory: " << sAppsPath << endl;
-                        autoUpdateDisabler.iterateSteamApps(sAppsPath);
+                        vector<int> appIds;
+                        try
+                        {
+                            appIds = fileUtility.getAcfID(sAppsPath);
+                        }
+                        catch (const exception &e)
+                        {
+                            cerr << ">Error: could not read " << sAppsPath << ": " << e.what() << endl;
+                            allOk = false;
+                            foundAny = true;
+                            continue;
+                        }
+                        if (!appIds.empty())
+                        {
+                            anyGames = true;
+                            if (!autoUpdateDisabler.iterateSteamApps(sAppsPath))
+                            {
+                                allOk = false;
+                            }
+                        }
                         foundAny = true;
                     }
                 }
                 
-                if (!foundAny)
+                if (!foundAny || !anyGames)
                 {
                     cout << ">There are no games in your steamapps folders" << endl;
                     continue;
                 }
-                cout << ">Success" << endl;
+                if (allOk)
+                {
+                    cout << ">Success" << endl;
+                }
+                else
+                {
+                    cout << ">Could not update every appmanifest file." << endl;
+                }
             }
             else if (input == "3")
             {

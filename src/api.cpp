@@ -1,16 +1,16 @@
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <algorithm>
-#include <filesystem>
-#include <string>
-#include "steam-tweak-tool/api.hpp"
+// #include <iostream>
+// #include <fstream>
+// #include <sstream>
+// #include <algorithm>
+// #include <filesystem>
+// #include <string>
+// #include "steam-tweak-tool/api.hpp"
 
-using namespace std;
+// using namespace std;
 
-Api::Api() {}
+// Api::Api() {}
 
-string url = "https://store.steampowered.com/api/appdetails?appids=";
+// string url = "https://store.steampowered.com/api/appdetails?appids=";
 
 // stringstream Api::removeQuotes(const string &game_ids)
 // {

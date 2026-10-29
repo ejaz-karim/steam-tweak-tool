@@ -34,11 +34,19 @@ string AutoUpdateDisabler::replaceStateFlags()
 bool AutoUpdateDisabler::iterateSteamApps(const string &steamAppsDirectory)
 {
     int modifiedCount = 0;
+    bool allOk = true;
     FileUtility fileUtility;
 
-    // Reuse getAcfID + sortAcfID so appmanifest files are processed in sorted
-    // app id order, consistent with option 3, and only appmanifests are touched.
-    vector<int> acfIds = fileUtility.getAcfID(steamAppsDirectory);
+    vector<int> acfIds;
+    try
+    {
+        acfIds = fileUtility.getAcfID(steamAppsDirectory);
+    }
+    catch (const exception &e)
+    {
+        cout << ">Error: could not read " << steamAppsDirectory << ": " << e.what() << endl;
+        return false;
+    }
     fileUtility.sortAcfID(acfIds);
 
     for (const int &id : acfIds)
@@ -74,8 +82,6 @@ bool AutoUpdateDisabler::iterateSteamApps(const string &steamAppsDirectory)
 
             file.close();
 
-            // Temporarily remove the read-only attribute (if set) so the file
-            // can be written, then restore it afterwards.
             bool wasReadOnly = fileUtility.isFileReadOnly(filePath);
             bool clearedReadOnly = wasReadOnly && fileUtility.setFileReadOnly(filePath, false);
 
@@ -84,7 +90,15 @@ bool AutoUpdateDisabler::iterateSteamApps(const string &steamAppsDirectory)
             if (opened)
             {
                 file_of << buffer.str();
+                if (!file_of)
+                {
+                    opened = false;
+                }
                 file_of.close();
+                if (!file_of)
+                {
+                    opened = false;
+                }
             }
 
             if (clearedReadOnly)
@@ -111,10 +125,11 @@ bool AutoUpdateDisabler::iterateSteamApps(const string &steamAppsDirectory)
         {
             cout << ">Error: " << e.what() << endl;
             cout << ">Close Steam and try again" << endl;
+            allOk = false;
         }
     }
 
     cout << ">Auto-update disabled for " << modifiedCount << " games" << endl;
     cout << endl;
-    return true;
+    return allOk;
 }

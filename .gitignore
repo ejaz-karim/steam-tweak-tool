@@ -1,3 +1,4 @@
+local-test-tools/
 ### Steam ###
 # Valve Data File and Steam Application Cache File
 *.vdf

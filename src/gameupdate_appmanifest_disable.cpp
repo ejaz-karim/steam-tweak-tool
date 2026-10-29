@@ -12,11 +12,81 @@
 using namespace std;
 namespace fs = std::filesystem;
 
+namespace
+{
+    bool isVdfSpace(char c)
+    {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+    }
+
+    string readManifestName(const string &path)
+    {
+        ifstream file(path, ios::binary);
+        if (!file)
+        {
+            return "";
+        }
+        string text((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+        size_t pos = 0;
+        int depth = 0;
+        string pendingKey;
+        while (pos < text.size())
+        {
+            char current = text[pos];
+            if (isVdfSpace(current))
+            {
+                pos++;
+                continue;
+            }
+            if (current == '{')
+            {
+                depth++;
+                pendingKey.clear();
+                pos++;
+                continue;
+            }
+            if (current == '}')
+            {
+                depth--;
+                pendingKey.clear();
+                pos++;
+                continue;
+            }
+            if (current == '[')
+            {
+                size_t close = text.find(']', pos);
+                pos = (close == string::npos) ? text.size() : close + 1;
+                continue;
+            }
+            if (current != '"')
+            {
+                pos++;
+                continue;
+            }
+            size_t close = text.find('"', pos + 1);
+            if (close == string::npos)
+            {
+                break;
+            }
+            string token = text.substr(pos + 1, close - pos - 1);
+            pos = close + 1;
+            if (pendingKey.empty())
+            {
+                pendingKey = token;
+                continue;
+            }
+            if (pendingKey == "name" && depth == 1)
+            {
+                return token;
+            }
+            pendingKey.clear();
+        }
+        return "";
+    }
+}
+
 GameUpdateDisabler::GameUpdateDisabler() {}
 
-// Collect every appmanifest_<id>.acf per library folder, in library order,
-// sorted by app id within each library. Reuses FileUtility::getAcfID() and
-// FileUtility::sortAcfID() from utility.cpp.
 vector<pair<int, string>> GameUpdateDisabler::collectAppManifests(const vector<string> &libraryPaths)
 {
     FileUtility fileUtility;
@@ -37,11 +107,10 @@ vector<pair<int, string>> GameUpdateDisabler::collectAppManifests(const vector<s
         }
         catch (const exception &)
         {
-            // Skip libraries that cannot be read
+
             continue;
         }
 
-        // sortAcfID sorts numerically and removes duplicates in place
         fileUtility.sortAcfID(acfIds);
 
         for (const int &id : acfIds)
@@ -76,9 +145,15 @@ void GameUpdateDisabler::printManifestList(const vector<pair<int, string>> &mani
             lastDirectory = directory;
         }
         bool readOnly = fileUtility.isFileReadOnly(manifest.second);
+        string gameName = readManifestName(manifest.second);
         cout << ">" << number << ". ["
              << (readOnly ? "DISABLED/READ-ONLY" : "ENABLED/WRITABLE")
-             << "] " << path.filename().string() << endl;
+             << "] " << path.filename().string();
+        if (!gameName.empty())
+        {
+            cout << " (" << gameName << ")";
+        }
+        cout << endl;
         number++;
     }
     cout << endl << ">0. Back to main menu" << endl;
@@ -113,6 +188,11 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
         cout << endl;
 
         int choice = 0;
+        if (input.empty() || input.find_first_not_of("0123456789") != string::npos)
+        {
+            cout << ">Invalid input" << endl;
+            continue;
+        }
         try
         {
             choice = stoi(input);
@@ -153,8 +233,7 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
         else if (action == "1" || action == "2")
         {
             bool wantReadOnly = (action == "1");
-            // Always re-apply the operation, even if the file already appears to
-            // be in the requested state.
+
             if (fileUtility.setFileReadOnly(filePath, wantReadOnly))
             {
                 bool nowReadOnly = fileUtility.isFileReadOnly(filePath);
@@ -172,6 +251,6 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
         {
             cout << ">Invalid input" << endl;
         }
-        // Loop back: the list is shown again with fresh states.
+
     }
 }

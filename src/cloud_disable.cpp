@@ -2048,7 +2048,7 @@ string stripAbsorbedStoreWrapper(const string &text, const string &eol)
         size_t j = i + 2;
         int depth = 1;
         vector<string> kids;
-        bool hasReal = false, onlyJunk = true, malformed = false;
+        bool hasReal = false, malformed = false;
         while (j < lines.size() && depth > 0)
         {
             string ct = trimS(lines[j]);
@@ -2084,10 +2084,6 @@ string stripAbsorbedStoreWrapper(const string &text, const string &eol)
                      ct.find("\"friendsui\"") == 0 || ct.find("\"FriendsUIJSON\"") == 0 ||
                      ct.find("\"Steam\"") == 0 || ct.find("\"Software\"") == 0 ||
                      ct.find("\"valve\"") == 0);
-                bool isSpotlight = low.find("spotlight") != string::npos ||
-                                   low.find("timeline") != string::npos ||
-                                   low.find("toast") != string::npos ||
-                                   isApps;
                 if (isApps || isSteamLeaf)
                     kids.push_back(lines[j]);
                 else
@@ -2425,7 +2421,18 @@ bool writeOutput(const string &path, const string &text, size_t idCount)
         return false;
     }
     sharedConfigFile << text;
+    if (!sharedConfigFile)
+    {
+        cerr << "Error: Could not write file " << path << endl;
+        sharedConfigFile.close();
+        return false;
+    }
     sharedConfigFile.close();
+    if (!sharedConfigFile)
+    {
+        cerr << "Error: Could not finish writing " << path << endl;
+        return false;
+    }
     cout << ">Modified: " << path << endl;
     cout << ">Disabled cloud for " << idCount << " games" << endl << endl;
     return true;
@@ -2760,9 +2767,25 @@ bool CloudDisabler::replaceAppsBlock(const string &sharedConfigPath, const strin
 bool CloudDisabler::iterateSharedConfig(const string &userDataPath, const string &acfIds)
 {
     FileUtility fileUtility;
-    for (const auto &entry : filesystem::directory_iterator(userDataPath))
+    bool allOk = true;
+    bool foundConfig = false;
+    error_code dirError;
+    filesystem::directory_iterator userEntries(userDataPath, dirError);
+    if (dirError)
     {
-        if (entry.is_directory())
+        cerr << "Error: could not read " << userDataPath << ": " << dirError.message() << endl;
+        return false;
+    }
+    for (const auto &entry : userEntries)
+    {
+        error_code entryError;
+        bool isDirectory = entry.is_directory(entryError);
+        if (entryError)
+        {
+            allOk = false;
+            continue;
+        }
+        if (isDirectory)
         {
             string steamID = entry.path().string();
             replace(steamID.begin(), steamID.end(), '\\', '/');
@@ -2772,11 +2795,24 @@ bool CloudDisabler::iterateSharedConfig(const string &userDataPath, const string
                 string sharedConfigPath = remotePath + "/sharedconfig.vdf";
                 if (filesystem::exists(sharedConfigPath))
                 {
-                    string sharedConfigText = fileUtility.readFileContents(sharedConfigPath);
-                    replaceAppsBlock(sharedConfigPath, sharedConfigText, acfIds);
+                    foundConfig = true;
+                    try
+                    {
+                        string sharedConfigText = fileUtility.readFileContents(sharedConfigPath);
+                        if (!replaceAppsBlock(sharedConfigPath, sharedConfigText, acfIds))
+                        {
+                            allOk = false;
+                        }
+                    }
+                    catch (const exception &e)
+                    {
+                        cerr << "Error: could not update " << sharedConfigPath << ": "
+                             << e.what() << endl;
+                        allOk = false;
+                    }
                 }
             }
         }
     }
-    return true;
+    return allOk && foundConfig;
 }

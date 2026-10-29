@@ -18,11 +18,14 @@ pub fn build(b: *std.Build) void {
         });
 
         exe_mod.addCSourceFiles(.{
-            .files = &.{ "src/autoupdate_disable.cpp", "src/cloud_disable.cpp", "src/delete_cloud_data.cpp", "src/gameupdate_appmanifest_disable.cpp", "src/main.cpp", "src/utility.cpp" },
+            .files = &.{ "src/autoupdate_disable.cpp", "src/cloud_disable.cpp", "src/delete_cloud_data.cpp", "src/gameupdate_appmanifest_disable.cpp", "src/main.cpp", "src/steam_chromedevtoolsprotocol.cpp", "src/utility.cpp" },
             .flags = &.{"-std=c++17"},
         });
 
         exe_mod.addIncludePath(b.path("include"));
+
+        exe_mod.linkSystemLibrary("ws2_32", .{});
+        exe_mod.linkSystemLibrary("urlmon", .{});
 
         const exe = b.addExecutable(.{
             .name = "Steam Tweak Tool",
