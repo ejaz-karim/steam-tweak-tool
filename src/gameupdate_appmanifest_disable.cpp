@@ -83,6 +83,15 @@ namespace
         }
         return "";
     }
+
+    string manifestLabel(const string &filename, const string &gameName)
+    {
+        if (gameName.empty())
+        {
+            return filename;
+        }
+        return gameName + " (" + filename + ")";
+    }
 }
 
 GameUpdateDisabler::GameUpdateDisabler() {}
@@ -145,15 +154,11 @@ void GameUpdateDisabler::printManifestList(const vector<pair<int, string>> &mani
             lastDirectory = directory;
         }
         bool readOnly = fileUtility.isFileReadOnly(manifest.second);
-        string gameName = readManifestName(manifest.second);
         cout << ">" << number << ". ["
-             << (readOnly ? "DISABLED/READ-ONLY" : "ENABLED/WRITABLE")
-             << "] " << path.filename().string();
-        if (!gameName.empty())
-        {
-            cout << " (" << gameName << ")";
-        }
-        cout << endl;
+             << (readOnly ? "DISABLED" : "ENABLED")
+             << "] "
+             << manifestLabel(path.filename().string(), readManifestName(manifest.second))
+             << endl;
         number++;
     }
     cout << endl << ">0. Back to main menu" << endl;
@@ -213,8 +218,9 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
         string filename = fs::path(filePath).filename().string();
 
         bool currentlyReadOnly = fileUtility.isFileReadOnly(filePath);
-        cout << ">" << filename << " is currently: "
-             << (currentlyReadOnly ? "READ-ONLY" : "WRITABLE") << endl;
+        string label = manifestLabel(filename, readManifestName(filePath));
+        cout << ">" << label << " current game update status: "
+             << (currentlyReadOnly ? "[DISABLED]" : "[ENABLED]") << endl;
         cout << ">Enter 1 to Disable game updates (set read-only)" << endl;
         cout << ">Enter 2 to Enable game updates (set writable)" << endl;
         cout << ">Enter 0 to cancel" << endl;
@@ -237,9 +243,9 @@ void GameUpdateDisabler::run(const vector<string> &libraryPaths)
             if (fileUtility.setFileReadOnly(filePath, wantReadOnly))
             {
                 bool nowReadOnly = fileUtility.isFileReadOnly(filePath);
-                cout << ">" << filename << " is now "
-                     << (nowReadOnly ? "READ-ONLY (game updates disabled)"
-                                     : "WRITABLE (game updates enabled)") << endl << endl;
+                cout << ">" << label << " current game update status: "
+                     << (nowReadOnly ? "[DISABLED]" : "[ENABLED]")
+                     << endl << endl;
             }
             else
             {
