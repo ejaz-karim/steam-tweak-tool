@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
         });
 
         exe_mod.addCSourceFiles(.{
-            .files = &.{ "src/autoupdate_disable.cpp", "src/cloud_disable.cpp", "src/delete_cloud_data.cpp", "src/gameupdate_appmanifest_disable.cpp", "src/main.cpp", "src/steam_chromedevtoolsprotocol.cpp", "src/utility.cpp" },
+            .files = &.{ "src/autoupdate_disable.cpp", "src/cloud_disable.cpp", "src/delete_cloud_data.cpp", "src/gameupdate_appmanifest_disable.cpp", "src/main.cpp", "src/steam_chromedevtoolsprotocol.cpp", "src/top_level_actions.cpp", "src/utility.cpp" },
             .flags = &.{"-std=c++17"},
         });
 

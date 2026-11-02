@@ -24,6 +24,7 @@
 #include "steam-tweak-tool/gameupdate_appmanifest_disable.hpp"
 #include "steam-tweak-tool/cloud_disable.hpp"
 #include "steam-tweak-tool/autoupdate_disable.hpp"
+#include "steam-tweak-tool/top_level_actions.hpp"
 #include "steam-tweak-tool/steam_chromedevtoolsprotocol.hpp"
 
 using namespace std;
@@ -157,6 +158,15 @@ namespace
             buffer << bytes << " B";
         }
         return buffer.str();
+    }
+
+    string formatGameLabel(int appId, const string &name)
+    {
+        if (name.empty())
+        {
+            return "App ID " + to_string(appId);
+        }
+        return name + " (App ID " + to_string(appId) + ")";
     }
 
     string extractVdfValue(const string &line, const string &key)
@@ -766,8 +776,7 @@ namespace
         {
             if (file.root != 0 && !isSafeCloudFileName(file.name))
             {
-                cout << ">Cannot prepare " << file.name
-                     << ": the cloud name is not a safe relative path." << endl;
+                cout << ">Skipping " << file.name << ": unsafe cloud path." << endl;
                 if (!removeUnpreparable)
                 {
                     kept.push_back(file);
@@ -1275,7 +1284,6 @@ namespace
 
     void startSteamShutdown(const string &steamRoot)
     {
-
         string rootBackslash = steamRoot;
         replace(rootBackslash.begin(), rootBackslash.end(), '/', '\\');
 
@@ -1292,7 +1300,6 @@ namespace
         if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, FALSE, 0,
                             nullptr, steamRoot.c_str(), &startupInfo, &processInfo))
         {
-            cout << ">Error: \"" << commandLine << "\" (workdir " << steamRoot << ")" << endl;
             printLastError("Starting steam.exe -shutdown");
         }
         if (processInfo.hProcess)
@@ -1619,6 +1626,18 @@ namespace
         }
     }
 
+    bool cloudSwitchesPresent(const string &sharedConfigPath)
+    {
+        try
+        {
+            return FileUtility().readFileContents(sharedConfigPath).find("\"CloudEnabled\"") != string::npos;
+        }
+        catch (const exception &)
+        {
+            return false;
+        }
+    }
+
     bool restartSteamAutomatically(const string &steamRoot, const string &userId,
                                    const string &personaName, const string &fixSharedConfig,
                                    bool preserveDiskEdits, bool enableCdp)
@@ -1628,66 +1647,52 @@ namespace
             long long baseline = readUserTimestamp(steamRoot, userId);
             if (!startSteamClient(steamRoot, enableCdp))
             {
-                cout << ">Error: could not start the Steam client. Start Steam manually," << endl;
-                cout << ">then run option 4 again." << endl;
+                cout << ">Error: could not start Steam; start it, then run option 4 again." << endl;
                 return false;
             }
-            cout << ">Waiting for Steam to start and log " << personaName
-                 << " in (up to 4 minutes)" << endl;
+            cout << ">Waiting for Steam to sign in as " << personaName << endl;
             if (!waitForSteamLogon(steamRoot, userId, baseline, 240000))
             {
-                cout << ">Could not confirm the Steam login within 4 minutes. If Steam is" << endl;
-                cout << ">still waiting for a password, log in, then run option 4 again." << endl;
+                cout << ">Steam did not sign in; log in, then run option 4 again." << endl;
                 return false;
             }
-            cout << ">Steam is running again and signed in as " << personaName << "." << endl;
+            cout << ">Signed in as " << personaName << "." << endl;
             return true;
         };
 
         if (!isSteamRunning())
         {
-            cout << endl;
-            cout << ">Steam is not running. Starting it now..." << endl;
+            cout << ">Starting Steam" << endl;
             return startAndAwaitLogon();
         }
         if (isSteamInGame())
         {
-            cout << endl;
-            cout << ">WARNING: Steam was NOT restarted automatically because a game appears" << endl;
-            cout << ">to be running (a parented steam.exe -applaunch host was found). Close" << endl;
-            cout << ">and reopen Steam when you can: until that restart the corrected" << endl;
-            cout << ">settings are not the ones Steam is actually using." << endl;
+            cout << ">A game is running; close it and restart Steam to apply the new settings." << endl;
             return false;
         }
 
-        cout << endl;
         if (preserveDiskEdits)
         {
-            cout << ">Force-closing the Steam client so the corrected config files are" << endl;
-            cout << ">kept (a graceful exit would let Steam rewrite them from its old" << endl;
-            cout << ">in-memory state)..." << endl;
+            cout << ">Force-closing Steam to keep the corrected config" << endl;
             forceKillSteam();
             if (!waitForSteamExit(60000))
             {
-                cout << ">Error: Steam did not shut down within 60 seconds. Restart Steam" << endl;
-                cout << ">manually, then run option 4 again." << endl;
+                cout << ">Error: Steam did not close; close it, then run option 4 again." << endl;
                 return false;
             }
             return startAndAwaitLogon();
         }
 
-        cout << ">Restarting the Steam client automatically so the new setting takes effect..." << endl;
+        cout << ">Restarting Steam" << endl;
         startSteamShutdown(steamRoot);
         if (!waitForSteamExit(15000))
         {
 
-            cout << ">Steam did not respond to the graceful shutdown command;" << endl;
-            cout << ">force-closing it (this skips Steam's config flush on exit)..." << endl;
+            cout << ">Steam did not close; force-closing it" << endl;
             forceKillSteam();
             if (!waitForSteamExit(45000))
             {
-                cout << ">Error: Steam did not shut down within 60 seconds. Restart Steam" << endl;
-                cout << ">manually, then run option 4 again." << endl;
+                cout << ">Error: Steam did not close; close it, then run option 4 again." << endl;
                 return false;
             }
         }
@@ -1697,18 +1702,22 @@ namespace
             int reEnabled = enableCloudEverywhere(fixSharedConfig);
             if (reEnabled > 0)
             {
-                cout << ">Steam re-applied its old cloud settings on exit; turning them" << endl;
-                cout << ">back on globally and for every game (the file is already" << endl;
-                cout << ">normalized)..." << endl;
-                cout << ">Cloud switches re-applied successfully." << endl;
+                cout << ">Steam reset the cloud switches; enabling them again" << endl;
             }
             else if (reEnabled < 0)
             {
-                cout << ">Could not re-apply the cloud switches: enable Steam Cloud" << endl;
-                cout << ">manually in Steam -> Settings -> Cloud after Steam restarts." << endl;
+                cout << ">Could not re-enable the cloud switches; use Steam -> Settings -> Cloud." << endl;
             }
         }
-        return startAndAwaitLogon();
+        if (!startAndAwaitLogon())
+        {
+            return false;
+        }
+        if (!fixSharedConfig.empty() && !allCloudSwitchesOn(fixSharedConfig))
+        {
+            enableCloudEverywhere(fixSharedConfig);
+        }
+        return true;
     }
 
     bool waitForCdpAvailable(int timeoutMs)
@@ -1747,105 +1756,6 @@ namespace
         }
         size_t lastSlash = exePath.find_last_of("\\/");
         return lastSlash == string::npos ? "." : exePath.substr(0, lastSlash);
-    }
-
-    bool runTopLevelOptionOne(const string &steamRoot, const vector<string> &libraryPaths)
-    {
-        string userDataPath = steamRoot + "/userdata";
-        if (!fs::exists(userDataPath))
-        {
-            cout << ">No userdata folder found, skipping Steam Cloud settings" << endl;
-            return false;
-        }
-        FileUtility fileUtility;
-        vector<int> combinedAcfIds;
-        bool libraryReadFailed = false;
-        for (const string &lib : libraryPaths)
-        {
-            string sAppsPath = lib + "/steamapps";
-            if (fs::exists(sAppsPath))
-            {
-                try
-                {
-                    vector<int> ids = fileUtility.getAcfID(sAppsPath);
-                    combinedAcfIds.insert(combinedAcfIds.end(), ids.begin(), ids.end());
-                }
-                catch (const exception &e)
-                {
-                    cerr << "Error: could not read " << sAppsPath << ": " << e.what() << endl;
-                    libraryReadFailed = true;
-                }
-            }
-        }
-        string acfIds = fileUtility.sortAcfID(combinedAcfIds);
-        if (acfIds.empty())
-        {
-            cout << ">There are no games in your steamapps folders" << endl;
-            return false;
-        }
-        CloudDisabler cloudDisabler;
-        bool ok = cloudDisabler.iterateSharedConfig(userDataPath, acfIds) && !libraryReadFailed;
-        if (ok)
-        {
-            cout << ">Success" << endl;
-        }
-        else
-        {
-            cout << ">Could not update every user's sharedconfig.vdf (or none was found)." << endl;
-        }
-        return ok;
-    }
-
-    bool runTopLevelOptionTwo(const vector<string> &libraryPaths)
-    {
-        bool foundAny = false;
-        bool anyGames = false;
-        bool allOk = true;
-        AutoUpdateDisabler autoUpdateDisabler;
-        FileUtility fileUtility;
-        for (const string &lib : libraryPaths)
-        {
-            string sAppsPath = lib + "/steamapps";
-            if (fs::exists(sAppsPath))
-            {
-                cout << ">Processing directory: " << sAppsPath << endl;
-                vector<int> appIds;
-                try
-                {
-                    appIds = fileUtility.getAcfID(sAppsPath);
-                }
-                catch (const exception &e)
-                {
-                    cerr << "Error: could not read " << sAppsPath << ": " << e.what() << endl;
-                    allOk = false;
-                    foundAny = true;
-                    continue;
-                }
-                if (!appIds.empty())
-                {
-                    anyGames = true;
-                    if (!autoUpdateDisabler.iterateSteamApps(sAppsPath))
-                    {
-                        allOk = false;
-                    }
-                }
-                foundAny = true;
-            }
-        }
-        if (!foundAny || !anyGames)
-        {
-            cout << ">There are no games in your steamapps folders" << endl;
-            return false;
-        }
-        if (allOk)
-        {
-            cout << ">Success" << endl;
-        }
-        else
-        {
-            cout << ">Could not update every appmanifest file." << endl;
-        }
-        return allOk;
     }
 
     struct PendingUpload
@@ -2230,39 +2140,42 @@ namespace
                               const string &personaName, bool liveConflicted)
     {
         CloudLogDigest digest = readCloudLogDigest(steamRoot, appId);
-        cout << ">Steam has this game's cloud sync marked conflicted, so a new change" << endl;
-        cout << ">may be ignored until it clears. Nothing is damaged: the files are either" << endl;
-        cout << ">still in the cloud or already gone." << endl;
-        if (!digest.evidence.empty())
+        cout << ">Cloud sync is conflicted; changes may be ignored." << endl;
+        if (liveConflicted)
         {
-            cout << ">Steam's log says:" << endl;
-            for (const auto &line : digest.evidence)
-            {
-                cout << ">  " << line << endl;
-            }
-        }
-        else if (liveConflicted)
-        {
-            cout << ">Steam reports it right now, even though its log no longer shows a line" << endl;
-            cout << ">for it." << endl;
+            cout << ">Steam reports the conflict right now." << endl;
         }
         if (digest.inFlight)
         {
-            cout << ">Steam is still uploading a change for this game, so a restart now could" << endl;
-            cout << ">interrupt it. Try again once that finishes." << endl;
+            cout << ">Steam is still uploading; try again shortly." << endl;
             return false;
         }
-        cout << ">Restart Steam to try to clear it? (This closes and reopens Steam; it does" << endl;
-        cout << ">not change anything in your cloud.)" << endl;
-        cout << ">Enter 1 to restart Steam, anything else to continue: " << endl;
-        string input;
-        cout << ">";
-        if (!getline(cin, input))
+        bool doRestart = false;
+        while (true)
         {
-            return false;
+            cout << ">Restart Steam to clear it?" << endl;
+            cout << ">Enter 1 to restart" << endl;
+            cout << ">Enter 0 to continue" << endl;
+            cout << ">";
+            string input;
+            if (!getline(cin, input))
+            {
+                return false;
+            }
+            if (input == "1")
+            {
+                doRestart = true;
+                cout << endl;
+                break;
+            }
+            if (input == "0")
+            {
+                break;
+            }
+            cout << endl;
+            cout << ">Invalid input" << endl;
         }
-        int choice = 0;
-        if (!parsePromptNumber(input, choice) || choice != 1)
+        if (!doRestart)
         {
             return false;
         }
@@ -2272,7 +2185,7 @@ namespace
         }
         waitForCdpAvailable(20000);
         cout << endl;
-        cout << ">Steam has restarted. Select this game again to continue." << endl;
+        cout << ">Steam restarted; select this game again." << endl;
         return true;
     }
 
@@ -2342,10 +2255,7 @@ namespace
             }
             if (!headerPrinted)
             {
-                cout << ">This game's previous deletion batch is still on its way to Steam." << endl;
-                cout << ">Touching the same app while Steam commits one change can leave its" << endl;
-                cout << ">cloud sync conflicted, so the tool waits for that batch to settle." << endl;
-                cout << ">Waiting" << flush;
+                cout << ">Waiting for the previous deletion to finish" << flush;
                 headerPrinted = true;
             }
             if (static_cast<long long>(remaining) != lastRemaining ||
@@ -2556,7 +2466,7 @@ namespace
         if (!outModule)
         {
             printLastError("Loading steam_api64.dll");
-            cout << ">Make sure steam_api64.dll is in the same folder as this program." << endl;
+            cout << ">steam_api64.dll must be in the same folder as this program." << endl;
             return api;
         }
 
@@ -2574,7 +2484,7 @@ namespace
 
         if (!api.valid())
         {
-            cout << ">Error: steam_api64.dll is missing required Steamworks exports." << endl;
+            cout << ">Error: steam_api64.dll is missing required exports." << endl;
         }
         return api;
     }
@@ -2592,59 +2502,55 @@ namespace
         }
 
         cout << endl;
-        cout << ">Deleting cloud data queues an update for this game and re-enables its" << endl;
-        cout << ">per-game Steam Cloud setting. Run option 1 (disable per-game cloud) and" << endl;
-        cout << ">then option 2 (disable auto-updates) now, in one go? (Will restart Steam)" << endl;
-        cout << ">Enter 1 for yes, anything else to skip: " << endl;
-        cout << ">";
-        string cleanupInput;
-        if (!getline(cin, cleanupInput))
+        bool runCleanup = false;
+        while (true)
         {
-            return false;
+            cout << ">Disable per-game cloud and auto-updates? (restarts Steam)" << endl;
+            cout << ">Enter 1 to disable them" << endl;
+            cout << ">Enter 0 to skip" << endl;
+            cout << ">";
+            string cleanupInput;
+            if (!getline(cin, cleanupInput))
+            {
+                return false;
+            }
+            if (cleanupInput == "1")
+            {
+                runCleanup = true;
+                cout << endl;
+                break;
+            }
+            if (cleanupInput == "0")
+            {
+                break;
+            }
+            cout << endl;
+            cout << ">Invalid input" << endl;
         }
-        cout << endl;
-        if (cleanupInput != "1")
+        if (!runCleanup)
         {
             return false;
         }
 
         if (!pendingNames.empty())
         {
-            cout << ">Waiting for Steam to finish uploading the deletions first" << endl;
-            cout << ">(a restart in the middle of the upload could drop them)" << flush;
+            cout << ">Waiting for the upload to finish." << flush;
             bool uploaded = waitForUploadToFinish(appId, remotecachePath, pendingNames, 240000);
             cout << endl;
             if (!uploaded)
             {
-                cout << ">Steam is still uploading them, so the cleanup and the Steam" << endl;
-                cout << ">restart were skipped. Run option 4 again once the game's cloud" << endl;
-                cout << ">page shows it empty." << endl;
+                cout << ">Still uploading; cleanup skipped." << endl;
                 return false;
             }
-            cout << ">Upload finished; continuing with the cleanup." << endl;
+            cout << endl;
         }
 
-        cout << ">Running option 1 (disable Steam Cloud per-game)..." << endl;
-        if (runTopLevelOptionOne(steamRoot, libraryPaths))
-        {
-            cout << ">Option 1 done." << endl;
-        }
-        else
-        {
-            cout << ">Option 1 finished with errors." << endl;
-        }
+        cout << ">Running option 1" << endl;
+        disableSteamCloudForAllGames(steamRoot + "/userdata", libraryPaths);
 
-        cout << ">Running option 2 (disable auto-updates and unschedule updates)..." << endl;
-        if (runTopLevelOptionTwo(libraryPaths))
-        {
-            cout << ">Option 2 done." << endl;
-        }
-        else
-        {
-            cout << ">Option 2 finished with errors." << endl;
-        }
+        cout << ">Running option 2" << endl;
+        disableAutoUpdatesForAllGames(libraryPaths);
 
-        cout << endl;
         restartSteamAutomatically(steamRoot, userId, personaName, "",
                                    true,  true);
         return true;
@@ -2652,19 +2558,15 @@ namespace
 
     void returnToMainMenuAfterCleanup()
     {
-        cout << endl;
-        cout << ">That cleanup disabled Steam Cloud globally, so option 4 cannot keep" << endl;
-        cout << ">deleting until it is re-enabled - staying in the game list here would" << endl;
-        cout << ">leave further deletions queued but never uploaded." << endl;
-        cout << ">Returning to the main menu. The next option 4 run re-enables Steam" << endl;
-        cout << ">Cloud globally and for every game, then restarts Steam automatically" << endl;
-        cout << ">before showing the list again." << endl;
+        cout << ">Cleanup done." << endl;
     }
 
-    bool runCloudSyncWorkerProcess(const string &appId, const string &remotecachePath, int &exitCode)
+    bool runCloudSyncWorkerProcess(const string &appId, const string &remotecachePath,
+                                   const string &gameName, int &exitCode)
     {
         string exePath = getExecutablePath();
-        string commandLine = "\"" + exePath + "\" --cloud-sync " + appId + " \"" + remotecachePath + "\"";
+        string commandLine = "\"" + exePath + "\" --cloud-sync " + appId + " \"" + remotecachePath +
+                             "\" \"" + gameName + "\"";
         STARTUPINFOA startupInfo;
         ZeroMemory(&startupInfo, sizeof(startupInfo));
         startupInfo.cb = sizeof(startupInfo);
@@ -2692,7 +2594,7 @@ namespace
         DWORD waitResult = WaitForSingleObject(processInfo.hProcess, 60000);
         if (waitResult == WAIT_TIMEOUT)
         {
-            cout << ">The Steam worker did not finish in time; stopping it." << endl;
+            cout << ">Worker timed out; stopping it." << endl;
             TerminateProcess(processInfo.hProcess, 1);
             WaitForSingleObject(processInfo.hProcess, 5000);
         }
@@ -2719,9 +2621,9 @@ CloudDataDeleter::CloudDataDeleter() {}
 int runCloudWorker(int argc, char *argv[])
 {
 #ifdef _WIN32
-    if (argc < 4)
+    if (argc < 5)
     {
-        cout << ">Usage: --cloud-worker <appid> <filelist>" << endl;
+        cout << ">Usage: --cloud-worker <appid> <filelist> <name>" << endl;
         return 2;
     }
 
@@ -2731,6 +2633,7 @@ int runCloudWorker(int argc, char *argv[])
         cout << ">Invalid appid: " << appIdString << endl;
         return 2;
     }
+    string gameName = (argc > 4) ? argv[4] : "";
 
     struct WorkerFile
     {
@@ -2805,13 +2708,10 @@ int runCloudWorker(int argc, char *argv[])
     int initResult = api.initFlat(initErrMsg);
     if (initResult != 0)
     {
-        cout << ">Error: could not connect to Steam for app " << appIdString
-             << " (InitFlat result " << initResult
-             << (initErrMsg[0] != '\0' ? ": " + string(initErrMsg) : "") << ")." << endl;
-        cout << ">Make sure Steam is running and logged in, then try again. If Steam already" << endl;
-        cout << ">holds an app session for this app (e.g. a running game or the client" << endl;
-        cout << ">itself), the attach attempt can fail:" << endl;
-        cout << ">close that session or retry after a client restart." << endl;
+        cout << ">Error: could not connect to " << formatGameLabel(atoi(appIdString.c_str()), gameName)
+             << (initErrMsg[0] != '\0' ? ": " + string(initErrMsg)
+                                        : " (code " + to_string(initResult) + ")")
+             << endl;
         DeleteFileA(appidFilePath.c_str());
         FreeLibrary(steamApiModule);
         return 1;
@@ -2820,7 +2720,7 @@ int runCloudWorker(int argc, char *argv[])
     void *remoteStorage = api.remoteStorageAccessor();
     if (!remoteStorage)
     {
-        cout << ">Error: could not access Steam Remote Storage interface." << endl;
+        cout << ">Error: Steam Remote Storage is unavailable." << endl;
         api.shutdown();
         DeleteFileA(appidFilePath.c_str());
         FreeLibrary(steamApiModule);
@@ -2854,7 +2754,7 @@ int runCloudWorker(int argc, char *argv[])
     }
     if (anyLocalUfsCopy)
     {
-        cout << ">Waiting for Steam to finish its app-session save scan" << flush;
+        cout << ">Waiting for Steam" << flush;
         for (int waited = 0; waited < 1000; waited += 500)
         {
             cout << "." << flush;
@@ -2892,14 +2792,13 @@ int runCloudWorker(int argc, char *argv[])
         else
         {
             successCount++;
-            cout << ">Deleted local copy (Steam uploads the deletion on exit): "
-                 << file.localPath << endl;
+            cout << ">Deleted local copy: " << file.localPath << endl;
         }
     }
 
     if (!ufsLocalPathsToClean.empty())
     {
-        cout << ">Holding the app session so Steam can register the deletions" << flush;
+        cout << ">Waiting for Steam to register the deletions" << flush;
         for (int waited = 0; waited < 500; waited += 250)
         {
             cout << "." << flush;
@@ -2911,10 +2810,6 @@ int runCloudWorker(int argc, char *argv[])
                 if (fs::exists(pathFromUtf8(localPath), ec))
                 {
                     fs::remove(pathFromUtf8(localPath), ec);
-                    if (!ec)
-                    {
-                        cout << ">Removed re-downloaded local copy: " << localPath << endl;
-                    }
                 }
             }
         }
@@ -2956,8 +2851,7 @@ int runCloudWorker(int argc, char *argv[])
             {
                 failCount++;
                 anyUfsFailed = true;
-                cout << ">Failed: " << file->name
-                     << " (still present after delete attempt)" << endl;
+                cout << ">Failed: " << file->name << " (still present)" << endl;
             }
         }
 
@@ -2977,12 +2871,13 @@ int runCloudWorker(int argc, char *argv[])
     DeleteFileA(appidFilePath.c_str());
     FreeLibrary(steamApiModule);
 
-    cout << ">Cloud worker done: " << successCount << " deleted"
-         << (failCount > 0 ? ", " + to_string(failCount) + " failed" : "")
-         << ". Exiting so Steam can sync." << endl;
+    if (failCount > 0)
+    {
+        cout << ">Worker: " << successCount << " deleted, " << failCount << " failed." << endl;
+    }
     if (anyUfsFailed)
     {
-        cout << ">Some files could not be deleted; see the failures above." << endl;
+        cout << ">Some auto-cloud files could not be deleted." << endl;
     }
 
     return failCount > 0 ? 1 : 0;
@@ -2997,13 +2892,14 @@ int runCloudWorker(int argc, char *argv[])
 int runCloudSyncWorker(int argc, char *argv[])
 {
 #ifdef _WIN32
-    if (argc < 4)
+    if (argc < 5)
     {
-        cout << ">Usage: --cloud-sync <appid> <remotecache.vdf>" << endl;
+        cout << ">Usage: --cloud-sync <appid> <remotecache.vdf> <name>" << endl;
         return 2;
     }
     string appIdString = argv[2];
     string remotecachePath = argv[3];
+    string gameName = (argc > 4) ? argv[4] : "";
     if (!isAllDigits(appIdString))
     {
         cout << ">Invalid appid: " << appIdString << endl;
@@ -3032,8 +2928,8 @@ int runCloudSyncWorker(int argc, char *argv[])
     char initErrMsg[1024] = {0};
     if (api.initFlat(initErrMsg) != 0)
     {
-        cout << ">Error: could not connect to Steam for app " << appIdString
-             << (initErrMsg[0] != '\0' ? ": " + string(initErrMsg) : "") << "." << endl;
+        cout << ">Error: could not connect to " << formatGameLabel(atoi(appIdString.c_str()), gameName)
+             << (initErrMsg[0] != '\0' ? ": " + string(initErrMsg) : "") << endl;
         DeleteFileA(appidFilePath.c_str());
         FreeLibrary(steamApiModule);
         return 1;
@@ -3042,7 +2938,7 @@ int runCloudSyncWorker(int argc, char *argv[])
     void *remoteStorage = api.remoteStorageAccessor();
     if (!remoteStorage)
     {
-        cout << ">Error: could not access Steam Remote Storage interface." << endl;
+        cout << ">Error: Steam Remote Storage is unavailable." << endl;
         api.shutdown();
         DeleteFileA(appidFilePath.c_str());
         FreeLibrary(steamApiModule);
@@ -3053,7 +2949,7 @@ int runCloudSyncWorker(int argc, char *argv[])
         api.setCloudEnabledForApp(remoteStorage, true);
     }
 
-    cout << ">Waiting for Steam to sync this app's cloud record" << flush;
+    cout << ">Waiting for Steam to sync the cloud record" << flush;
     bool appeared = false;
     int lastDotSecond = 0;
     int reportedCount = -1;
@@ -3069,7 +2965,7 @@ int runCloudSyncWorker(int argc, char *argv[])
                 reportedCount = cloudCount;
                 if (cloudCount > 0)
                 {
-                    cout << endl << ">Steam lists " << cloudCount << " cloud file(s) for this app." << endl;
+                    cout << endl << ">Steam lists " << cloudCount << " cloud file(s)." << endl;
                 }
             }
         }
@@ -3117,10 +3013,10 @@ int runCloudSyncWorker(int argc, char *argv[])
 
     if (appeared)
     {
-        cout << ">Steam created the app's cloud record." << endl;
+        cout << ">Steam created the cloud record." << endl;
         return 0;
     }
-    cout << ">Steam did not create a cloud record for app " << appIdString << "." << endl;
+    cout << ">Steam did not create a cloud record." << endl;
     return 3;
 #else
     (void)argc;
@@ -3191,8 +3087,7 @@ int runCloudSyncWorker(int argc, char *argv[])
                 fs::copy_file(target, entry.backup, fs::copy_options::overwrite_existing, ec);
                 if (ec)
                 {
-                    cout << ">Could not back up " << file.name
-                         << " before emptying; skipping it." << endl;
+                    cout << ">Could not back up " << file.name << "; skipping it." << endl;
                     continue;
                 }
                 entry.existed = true;
@@ -3226,12 +3121,12 @@ int runCloudSyncWorker(int argc, char *argv[])
         }
         if (!syncRequested)
         {
-            cout << ">Steam did not accept the sync for app " << appId;
+            cout << ">Steam did not sync " << formatGameLabel(appId, gameName);
             if (!syncError.empty())
             {
                 cout << " (" << syncError << ")";
             }
-            cout << "; restoring the original files." << endl;
+            cout << "; restoring files." << endl;
             for (const auto &entry : ready)
             {
                 if (entry.existed)
@@ -3248,7 +3143,7 @@ int runCloudSyncWorker(int argc, char *argv[])
             return false;
         }
 
-        cout << ">Asked Steam to upload the empty local copies; waiting for the upload" << flush;
+        cout << ">Waiting for Steam to upload" << flush;
         vector<CdpCloudFile> pageFiles;
         string pageError;
         bool pageReadable = false;
@@ -3301,7 +3196,7 @@ int runCloudSyncWorker(int argc, char *argv[])
         cout << endl;
 
         int emptiedCount = 0;
-        cout << ">Per-file result:" << endl;
+        vector<string> stillListed;
         for (const auto &entry : ready)
         {
             bool found = false;
@@ -3319,26 +3214,24 @@ int runCloudSyncWorker(int argc, char *argv[])
             {
                 outEmptied.insert(entry.name);
                 emptiedCount++;
-                cout << ">  [EMPTIED] " << entry.name << " (0 B)" << endl;
+                continue;
+            }
+            stillListed.push_back(found ? entry.name + " (" + to_string(size) + " B)"
+                                        : entry.name);
+            if (entry.existed)
+            {
+                fs::copy_file(entry.backup, entry.target,
+                              fs::copy_options::overwrite_existing, ec);
             }
             else
             {
-                cout << ">  [STILL LISTED] " << entry.name;
-                if (found)
-                {
-                    cout << " (" << size << " B)";
-                }
-                cout << endl;
-                if (entry.existed)
-                {
-                    fs::copy_file(entry.backup, entry.target,
-                                  fs::copy_options::overwrite_existing, ec);
-                }
-                else
-                {
-                    fs::remove(entry.target, ec);
-                }
+                fs::remove(entry.target, ec);
             }
+        }
+        cout << ">Emptied " << emptiedCount << " of " << ready.size() << " file(s) to 0 B" << endl;
+        for (const auto &name : stillListed)
+        {
+            cout << ">[" << name << "] (still listed)" << endl;
         }
 
         fs::remove_all(backupDir, ec);
@@ -3357,12 +3250,11 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
     string personaName;
     if (!resolveCurrentUser(steamRoot, userId, personaName))
     {
-        cout << ">Error: could not determine the current Steam user from config/loginusers.vdf" << endl;
+        cout << ">Error: could not find the current Steam user." << endl;
         return;
     }
 
-    cout << ">Using Steam user: " << personaName << " (" << userId << ")" << endl;
-    cout << ">(Note: only the currently signed-in user is supported. To manage a different user, switch accounts in Steam and run this again.)" << endl;
+    cout << ">Steam user: " << personaName << " (" << userId << ")" << endl;
 
     string userDataPath = steamRoot + "/userdata/" + userId;
     if (!fs::exists(userDataPath))
@@ -3373,33 +3265,16 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
 
     string sharedConfigPath = userDataPath + "/7/remote/sharedconfig.vdf";
     bool steamJustRestarted = false;
-    if (fs::exists(sharedConfigPath))
+    if (fs::exists(sharedConfigPath) && cloudSwitchesPresent(sharedConfigPath))
     {
-        if (allCloudSwitchesOn(sharedConfigPath))
+        if (!allCloudSwitchesOn(sharedConfigPath))
         {
-            cout << ">Steam Cloud is already enabled globally and for every game." << endl;
-            cout << ">Skipping the normalization and Steam restart." << endl;
-            cout << endl;
-        }
-        else
-        {
-            cout << ">Preparing Steam Cloud: deletions only sync while cloud is enabled" << endl;
-            cout << ">globally and for the game, so both are set up now." << endl;
-            cout << endl;
-            cout << ">Running the real top-level option 1 first (all libraries, all users):" << endl;
-            cout << ">this normalizes sharedconfig.vdf and writes every cloud switch as off." << endl;
-            cout << endl;
-            runTopLevelOptionOne(steamRoot, libraryPaths);
-
-            cout << ">Turning Steam Cloud back on globally and for every game..." << endl;
+            cout << ">Enabling Steam Cloud" << endl;
             if (enableCloudEverywhereForAllUsers(steamRoot) > 0)
             {
-                cout << ">Could not enable Steam Cloud for every user automatically." << endl;
-                cout << ">Please turn it on manually in Steam -> Settings -> Cloud, restart" << endl;
-                cout << ">Steam, and run option 4 again." << endl;
+                cout << ">Error: could not enable Steam Cloud for every user; retry, or turn Cloud on in Steam -> Settings -> Cloud." << endl;
                 return;
             }
-            cout << ">Steam Cloud is enabled globally and for every game." << endl;
 
 #ifdef _WIN32
             if (!restartSteamAutomatically(steamRoot, userId, personaName, sharedConfigPath,
@@ -3409,9 +3284,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
             }
             steamJustRestarted = true;
 #else
-            cout << endl;
-            cout << ">Restart Steam manually for the new settings to take effect, then run" << endl;
-            cout << ">option 4 again." << endl;
+            cout << ">Restart Steam to apply the new settings, then run option 4 again." << endl;
             return;
 #endif
 
@@ -3427,19 +3300,12 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
     {
         if (isSteamInGame())
         {
-            cout << endl;
-            cout << ">Note: Steam is running a game, so it was not restarted to enable" << endl;
-            cout << ">its cloud page. This list only includes apps that already have a" << endl;
-            cout << ">local cloud record; close the game and re-run option 4 for the" << endl;
-            cout << ">full list (cloud-only saves are listed there too)." << endl;
+            cout << ">A game is running; only local records are listed." << endl;
         }
         else if (!cdpRestartAttempted)
         {
             cdpRestartAttempted = true;
-            cout << endl;
-            cout << ">Steam's cloud page is not available yet. Games whose cloud saves" << endl;
-            cout << ">were never synced to this PC are only listed there, so Steam is" << endl;
-            cout << ">restarted now with its local debug port enabled." << endl;
+            cout << ">Steam's cloud page is unavailable; restarting Steam in debug mode" << endl;
             if (restartSteamAutomatically(steamRoot, userId, personaName, "",
                                            false,  true))
             {
@@ -3448,9 +3314,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         }
         else
         {
-            cout << endl;
-            cout << ">Steam's cloud page could not be enabled automatically; continuing" << endl;
-            cout << ">with the local list. Re-run option 4 to try again." << endl;
+            cout << ">Could not open Steam's cloud page; using the local list." << endl;
         }
     }
 
@@ -3477,10 +3341,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         }
         else if (!cloudPageWarningShown)
         {
-            cout << endl;
-            cout << ">Note: could not read Steam's own cloud page: " << cloudPageError << "." << endl;
-            cout << ">This list only includes apps with a local sync record, so cloud-only" << endl;
-            cout << ">saves may be missing. Re-run option 4 to try again." << endl;
+            cout << ">Could not read Steam's cloud page (" << cloudPageError << "); using the local list." << endl;
             cloudPageWarningShown = true;
         }
 
@@ -3555,17 +3416,16 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         }
         savePendingUploads(pendingUploads);
 
-        cout << ">Cloud game library (games with Steam Cloud data):" << endl;
+        cout << ">Games with Steam Cloud data:" << endl;
         if (games.empty())
         {
-            cout << "(no game has a local cloud record right now)" << endl;
+            cout << ">No games with Steam Cloud data." << endl;
         }
         const set<int> conflictedApps = readConflictedApps(steamRoot);
         int number = 1;
         for (const auto &game : games)
         {
-            cout << ">" << number << ". " << game.appId << " - "
-                 << (game.name.empty() ? "(unknown name)" : game.name)
+            cout << ">" << number << ". " << formatGameLabel(game.appId, game.name)
                  << " [" << (game.installed ? "installed" : "not installed") << "] - "
                  << game.fileCount << (game.fileCount == 1 ? " file, " : " files, ")
                  << (game.totalSizeText.empty() ? formatSize(game.totalSize)
@@ -3594,11 +3454,11 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         {
             return;
         }
-        cout << endl;
 
         int choice = 0;
         if (!parsePromptNumber(input, choice))
         {
+            cout << endl;
             cout << ">Invalid input" << endl;
             continue;
         }
@@ -3606,6 +3466,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         {
             return;
         }
+        cout << endl;
 
         if (choice < 1 || choice > static_cast<int>(games.size()))
         {
@@ -3646,22 +3507,18 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                                                 pendingIt->second.fileNames);
                 if (!outcome.safeToContinue)
                 {
-                    cout << ">Steam has not finished this game's previous deletion batch, so" << endl;
-                    cout << ">nothing new was started for it. Let it finish, then try again." << endl;
-                    cout << ">Returning to the game list." << endl;
+                    cout << ">Previous deletion is still uploading." << endl;
                     continue;
                 }
                 pendingUploads.erase(pendingIt);
                 savePendingUploads(pendingUploads);
                 if (outcome.finishedClean)
                 {
-                    cout << ">Steam has finished this game's previous deletion batch; nothing is" << endl;
-                    cout << ">left for it. Returning to the game list." << endl;
+                    cout << ">Previous deletion finished; nothing to re-queue." << endl;
                     continue;
                 }
-                cout << ">Steam has finished this game's previous deletion batch; "
-                     << outcome.leftoverCount << " file(s) are" << endl;
-                cout << ">still listed and can be re-queued now." << endl;
+                cout << ">Previous deletion finished; " << outcome.leftoverCount
+                     << " file(s) still listed." << endl;
             }
         }
 
@@ -3728,19 +3585,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                 }
             }
         }
-        if (recordMatchesList)
-        {
-            unsigned long long recordTotal = 0;
-            for (const auto &file : files)
-            {
-                recordTotal += file.size;
-            }
-            cout << ">Loaded " << files.size() << (files.size() == 1 ? " file" : " files")
-                 << ", " << (game.totalSizeText.empty() ? formatSize(recordTotal)
-                                                       : game.totalSizeText)
-                 << ", from this PC's sync record (Steam lists the same count)." << endl;
-        }
-        else
+        if (!recordMatchesList)
         {
             vector<CloudFileInfo> localFiles = files;
             vector<bool> localUsed(localFiles.size(), false);
@@ -3756,27 +3601,23 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
             {
                 if (files.empty())
                 {
-                    cout << ">Could not get a file list for app " << game.appId << ":" << endl;
-                    cout << ">  " << cloudFileError << endl;
+                    cout << ">Could not get a file list for " << formatGameLabel(game.appId, game.name)
+                         << ": " << cloudFileError << endl;
                     if (hasLocalRecord)
                     {
-                        cout << ">Its local sync record is empty, so there is nothing to delete here." << endl;
+                        cout << ">Local record is empty; nothing to delete." << endl;
                     }
                     else
                     {
-                        cout << ">Steam's cloud page did not list any files for this app. If it is" << endl;
-                        cout << ">gone from your account (delisted), Steam Support has to restore it" << endl;
-                        cout << ">first. Otherwise re-run option 4 to retry." << endl;
+                        cout << ">Steam lists no files; if the game was delisted, Steam Support must restore it." << endl;
                     }
                     continue;
                 }
-                cout << ">Could not read Steam's cloud page for this app; showing the" << endl;
-                cout << ">local sync record instead. Cloud-only files may be missing." << endl;
+                cout << ">Could not read Steam's cloud page; using the local record." << endl;
             }
             else
             {
                 files.clear();
-                unsigned long long cloudTotal = 0;
                 auto sizesMatch = [](unsigned long long left, unsigned long long right)
                 {
                     if (left == right)
@@ -3851,7 +3692,6 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                     }
 
                     files.push_back(file);
-                    cloudTotal += file.size;
                 }
                 filesFromCloudPage = true;
 
@@ -3859,25 +3699,16 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                 {
                     if (cloudFiles.empty())
                     {
-                        cout << ">Steam's cloud page lists no files for this app; the local" << endl;
-                        cout << ">sync record is stale. Returning to the game list." << endl;
+                        cout << ">Steam lists no files; the local record is stale." << endl;
                     }
                     else
                     {
-                        cout << ">None of this app's cloud files use a supported root; nothing" << endl;
-                        cout << ">was changed." << endl;
+                        cout << ">No files use a supported root; nothing changed." << endl;
                     }
                     continue;
                 }
 
-                cout << ">Loaded " << files.size() << (files.size() == 1 ? " file" : " files")
-                     << ", "
-                     << (game.totalSizeText.empty() ? formatSize(cloudTotal)
-                                                    : game.totalSizeText)
-                     << ", from Steam's cloud page." << endl;
-
                 hasLocalCopy.assign(files.size(), false);
-                bool anyMissingLocalCopy = false;
                 for (size_t i = 0; i < files.size(); i++)
                 {
                     if (files[i].root == 0)
@@ -3899,15 +3730,6 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
 
                         hasLocalCopy[i] = exists && (localSize > 0 || files[i].size == 0);
                     }
-                    if (!hasLocalCopy[i])
-                    {
-                        anyMissingLocalCopy = true;
-                    }
-                }
-                if (anyMissingLocalCopy)
-                {
-                    cout << ">Files marked \"no local copy\" are already gone from this PC," << endl;
-                    cout << ">so their cloud copies are removed directly in the app session." << endl;
                 }
             }
         }
@@ -3916,46 +3738,50 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         vector<CloudFileInfo> selected;
         bool deletionRequested = false;
         bool firstFileList = true;
+        auto formatFileLine = [&](size_t index)
+        {
+            const CloudFileInfo &file = files[index];
+            string line = ">" + to_string(index + 1) + ".";
+            if (queued.count(index) != 0)
+            {
+                line += " [QUEUED]";
+            }
+            line += " " + file.name + " (" +
+                    (file.sizeText.empty() ? formatSize(file.size) : file.sizeText);
+            if (file.root != 0)
+            {
+                line += ", root: " + rootNameForRoot(file.root);
+                if (filesFromCloudPage && !hasLocalCopy[index])
+                {
+                    line += ", no local copy";
+                }
+            }
+            if (file.size == 0)
+            {
+                line += ", empty file";
+            }
+            return line + ")";
+        };
         while (true)
         {
-            cout << ">Cloud files for " << game.appId
-                 << (game.name.empty() ? "" : " - " + game.name) << ":" << endl;
             if (firstFileList)
             {
-                cout << "(no root note = API-managed cloud file; a root note marks an auto-cloud" << endl;
-                cout << "> file synced from that local folder - deleting one removes the local copy" << endl;
-                cout << "> and Steam syncs the deletion to the cloud)" << endl;
-                cout << ">Select a file's number to add it to the deletion queue; select it again to remove it." << endl;
+                cout << ">Cloud files for " << formatGameLabel(game.appId, game.name) << ":" << endl;
+                bool anyRoot = false;
+                for (const auto &file : files)
+                {
+                    anyRoot = anyRoot || file.root != 0;
+                }
+                if (anyRoot)
+                {
+                    cout << ">(auto-cloud files also delete the local copy)" << endl;
+                }
+                for (size_t index = 0; index < files.size(); index++)
+                {
+                    cout << formatFileLine(index) << endl;
+                }
+                firstFileList = false;
             }
-
-            int fileNumber = 1;
-            for (const auto &file : files)
-            {
-                cout << ">" << fileNumber << ".";
-                if (queued.count(static_cast<size_t>(fileNumber - 1)) != 0)
-                {
-                    cout << " [QUEUED]";
-                }
-                cout << " " << file.name << " ("
-                     << (file.sizeText.empty() ? formatSize(file.size) : file.sizeText);
-                if (file.root != 0)
-                {
-                    cout << ", root: " << rootNameForRoot(file.root);
-                    if (filesFromCloudPage &&
-                        !hasLocalCopy[static_cast<size_t>(fileNumber - 1)])
-                    {
-                        cout << ", no local copy";
-                    }
-                }
-                if (file.size == 0)
-                {
-
-                    cout << ", empty file";
-                }
-                cout << ")" << endl;
-                fileNumber++;
-            }
-            firstFileList = false;
 
             bool allQueued = (queued.size() == files.size());
             cout << ">" << (files.size() + 1) << ". "
@@ -3978,20 +3804,24 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
             }
             if (fileChoice == -2)
             {
+                cout << endl;
                 cout << ">Invalid input" << endl;
                 continue;
             }
             if (fileChoice >= 1 && fileChoice <= static_cast<int>(files.size()))
             {
+                cout << endl;
                 size_t index = static_cast<size_t>(fileChoice - 1);
                 if (!queued.insert(index).second)
                 {
                     queued.erase(index);
                 }
+                firstFileList = true;
                 continue;
             }
             if (fileChoice == static_cast<int>(files.size()) + 1)
             {
+                cout << endl;
                 if (allQueued)
                 {
                     queued.clear();
@@ -4003,6 +3833,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                         queued.insert(index);
                     }
                 }
+                firstFileList = true;
                 continue;
             }
             if (!queued.empty() && fileChoice == static_cast<int>(files.size()) + 2)
@@ -4014,6 +3845,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                 deletionRequested = true;
                 break;
             }
+            cout << endl;
             cout << ">Invalid input" << endl;
         }
         if (!deletionRequested)
@@ -4031,50 +3863,45 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         }
 
         cout << endl;
-        if (!game.installed && !ufsFiles.empty())
-        {
-            cout << ">Warning: this game is not installed. Auto-cloud (UFS) files are" << endl;
-            cout << ">deleted through a Steam app session, which still connects without the" << endl;
-            cout << ">game installed, but if the game was removed from your account (e.g." << endl;
-            cout << ">delisted from the Steam store, like Dead Island: Epidemic), Steam" << endl;
-            cout << ">Support would need to restore it first (help.steampowered.com ->" << endl;
-            cout << ">search the game -> \"restore to library\")." << endl;
-        }
-        else if (!game.installed)
-        {
-
-            cout << ">Note: this game is not installed, but that does NOT block these" << endl;
-            cout << ">deletions: API-managed cloud files are handled by a Steam remote-storage" << endl;
-            cout << ">session, which still connects for uninstalled games (verified live for" << endl;
-            cout << ">appid 222900)." << endl;
-        }
-        cout << ">About to PERMANENTLY delete " << selected.size()
-             << (selected.size() == 1 ? " cloud file" : " cloud files") << " from app " << game.appId
-             << ":" << endl;
-        if (!ufsFiles.empty())
-        {
-            cout << ">(" << ufsFiles.size() << " auto-cloud file(s): the cloud copy is deleted through" << endl;
-            cout << "> Steam, then its local copy is removed as well)" << endl;
-        }
+        string gameLabel = formatGameLabel(game.appId, game.name);
+        cout << ">Delete " << selected.size()
+             << (selected.size() == 1 ? " cloud file" : " cloud files") << " from " << gameLabel
+             << "?" << endl;
         for (const auto &file : selected)
         {
-            cout << ">  - " << file.name << endl;
+            cout << ">[" << file.name << "]" << endl;
         }
-        cout << ">Steam must be running: the worker connects to Steam, deletes the cloud" << endl;
-        cout << ">copies and exits so the client can sync the deletions. If Steam refuses" << endl;
-        cout << ">a deletion (for example while the client itself owns the app's session)," << endl;
-        cout << ">the file is emptied to 0 bytes instead." << endl;
-        cout << ">Enter 1 to confirm deletion, anything else to cancel: " << endl;
-
-        string confirmInput;
-        cout << ">";
-        if (!getline(cin, confirmInput))
+        if (!ufsFiles.empty())
         {
-            continue;
+            cout << ">(" << ufsFiles.size() << " auto-cloud files delete the local copy too)" << endl;
         }
-        cout << endl;
-        if (confirmInput != "1")
+        bool confirmed = false;
+        while (true)
         {
+            cout << ">Enter 1 to confirm" << endl;
+            cout << ">Enter 0 to cancel" << endl;
+            cout << ">";
+            string confirmInput;
+            if (!getline(cin, confirmInput))
+            {
+                return;
+            }
+            if (confirmInput == "1")
+            {
+                confirmed = true;
+                cout << endl;
+                break;
+            }
+            if (confirmInput == "0")
+            {
+                break;
+            }
+            cout << endl;
+            cout << ">Invalid input" << endl;
+        }
+        if (!confirmed)
+        {
+            cout << endl;
             cout << ">Cancelled" << endl;
             continue;
         }
@@ -4082,7 +3909,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
 #ifdef _WIN32
         if (!isSteamRunning())
         {
-            cout << ">Error: Steam is not running. Start Steam, log in, and try again." << endl;
+            cout << ">Error: Steam is not running." << endl;
             continue;
         }
 
@@ -4090,8 +3917,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         dropUnsafeCloudNames(selected, true);
         if (selected.empty())
         {
-            cout << ">None of the selected files could be prepared for deletion; nothing" << endl;
-            cout << ">was deleted." << endl;
+            cout << ">Error: no file could be prepared; nothing deleted." << endl;
             continue;
         }
         if (selected.size() < requestedCount)
@@ -4165,57 +3991,21 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
         bool workerLaunchFailed = false;
         int exitCode = 1;
         set<string> emptiedNames;
-        set<string> blockedByConflict;
-
-        auto printPerFileSummary = [&]()
-        {
-            if (deletedNames.empty())
-            {
-                return;
-            }
-            set<string> remaining;
-            bool recordReadable = !deletionQueued &&
-                                  readRemainingCloudNames(remotecachePath, remaining);
-            cout << ">Per-file verification:" << endl;
-            for (const auto &name : deletedNames)
-            {
-                if (emptiedNames.count(name) != 0)
-                {
-                    cout << ">  [EMPTIED (0 B)] " << name << endl;
-                    continue;
-                }
-                if (blockedByConflict.count(name) != 0)
-                {
-                    cout << ">  [STILL LISTED] " << name << endl;
-                    continue;
-                }
-                if (deletionQueued)
-                {
-                    cout << ">  [OK] " << name << endl;
-                    continue;
-                }
-                const char *status = "UNVERIFIED";
-                if (recordReadable)
-                {
-                    status = (remaining.count(name) != 0) ? "STILL LISTED" : "FAILED";
-                }
-                cout << ">  [" << status << "] " << name << endl;
-            }
-        };
 
         {
             bool needsInitialSync = (!game.hasLocalRecord && !ufsFiles.empty());
             if (needsInitialSync)
             {
-                cout << ">Registering the cloud copy in Steam's local record first" << endl;
+                cout << ">Registering the cloud record in Steam" << endl;
                 int syncExitCode = 1;
-                runCloudSyncWorkerProcess(to_string(game.appId), remotecachePath, syncExitCode);
+                runCloudSyncWorkerProcess(to_string(game.appId), remotecachePath, game.name, syncExitCode);
 
                 Sleep(1000);
             }
 
             string exePath = getExecutablePath();
-            string commandLine = "\"" + exePath + "\" --cloud-worker " + to_string(game.appId) + " \"" + listPath + "\"";
+            string commandLine = "\"" + exePath + "\" --cloud-worker " + to_string(game.appId) +
+                                 " \"" + listPath + "\" \"" + game.name + "\"";
 
             STARTUPINFOA startupInfo;
             ZeroMemory(&startupInfo, sizeof(startupInfo));
@@ -4234,7 +4024,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
             ZeroMemory(&processInfo, sizeof(processInfo));
 
             string workingDir = getExecutableDirectory();
-            cout << ">Connecting to Steam and deleting cloud files..." << endl;
+            cout << ">Deleting " << attemptedCount << (attemptedCount == 1 ? " file" : " files") << endl;
             if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, workingDir.data(), &startupInfo, &processInfo))
             {
                 printLastError("Launching cloud worker process");
@@ -4249,7 +4039,7 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
             DWORD waitResult = WaitForSingleObject(processInfo.hProcess, 60000);
             if (waitResult == WAIT_TIMEOUT)
             {
-                cout << ">The Steam worker did not finish in time; stopping it." << endl;
+                cout << ">Worker timed out; stopping it." << endl;
                 TerminateProcess(processInfo.hProcess, 1);
                 WaitForSingleObject(processInfo.hProcess, 5000);
             }
@@ -4273,24 +4063,13 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                 {
                     if (cdpPreferLocalAppSync(game.appId, syncError))
                     {
-                        cout << ">Steam's cloud sync for this game was conflicted, so the" << endl;
-                        cout << ">deletions had only reached its local record. Resolved it" << endl;
-                        cout << ">with this PC's copy (the same action as Steam's conflict" << endl;
-                        cout << ">button): every other file here keeps this PC's version, and" << endl;
-                        cout << ">these deletions can now upload." << endl;
+                        cout << ">Conflict resolved with this PC's copy." << endl;
                         gameConflicted = false;
                     }
                     else
                     {
                         cdpRetryAppSync(game.appId, syncError);
-                        cout << ">Steam's cloud sync for this game is conflicted, so these" << endl;
-                        cout << ">deletions are only in its local record and cannot upload." << endl;
-                        cout << ">Use Steam's cloud-conflict button or restart Steam, then" << endl;
-                        cout << ">delete them again." << endl;
-                        for (const auto &name : deletedNames)
-                        {
-                            blockedByConflict.insert(name);
-                        }
+                        cout << ">Cloud sync is conflicted; deletions stay local. Restart Steam and retry." << endl;
                     }
                 }
                 else
@@ -4353,84 +4132,48 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                 }
             }
 
-            if (!stillListedFiles.empty())
+            if (stillListedFiles.empty())
             {
-                cout << ">Not deleted - Steam still lists these file(s):" << endl;
-                for (const auto &file : stillListedFiles)
+                if (!recordReadable && !pageChecked)
                 {
-                    cout << ">  - " << file.name << endl;
+                    cout << ">Could not read Steam's file list." << endl;
                 }
-            }
-            else if (!recordReadable && !pageChecked)
-            {
-                cout << ">Neither Steam's local record nor its cloud page could be read;" << endl;
-                cout << ">the worker's failures above are what Steam reported." << endl;
-            }
-            else
-            {
-                cout << ">Steam no longer lists these files, but the worker reported" << endl;
-                cout << ">failures for them." << endl;
+                else
+                {
+                    cout << ">Steam no longer lists these files." << endl;
+                }
             }
 
             if (!stillListedFiles.empty())
             {
-                cout << ">Steam refused the deletion; trying to empty these files to 0 bytes" << endl;
-                cout << ">instead (the cloud copy is emptied, not removed)." << endl;
+                cout << ">Steam refused the deletion; emptying to 0 B." << endl;
                 set<string> emptied;
                 emptyCloudFilesToZero(game.appId, stillListedFiles, userDataPath, steamRoot,
                                       libraryPaths, manifestPath, game.name, emptied);
                 emptiedNames.insert(emptied.begin(), emptied.end());
                 if (stillListedFiles.size() > emptiedNames.size())
                 {
-                    cout << ">Some files could not be deleted or emptied. Give Steam a minute and" << endl;
-                    cout << ">re-run option 4 for this game to retry them." << endl;
+                    cout << ">Could not delete or empty " << (stillListedFiles.size() - emptiedNames.size()) << " file(s); retry." << endl;
                 }
             }
             else if (exitCode == 1)
             {
-                cout << ">Finished with failures (see the worker output above). If every file failed" << endl;
-                cout << ">and this game was removed from your account (e.g. delisted), restore it via" << endl;
-                cout << ">Steam Support -> \"restore to library\"." << endl;
+                cout << ">Finished with failures; retry." << endl;
             }
             else
             {
-                cout << ">The cloud worker exited with code " << exitCode << " before deleting" << endl;
-                cout << ">these files; re-run option 4 to retry." << endl;
+                cout << ">Worker failed (exit " << exitCode << "); retry." << endl;
             }
 
-            printPerFileSummary();
-
-            if (!stillListedFiles.empty())
+            if (!stillListedFiles.empty() && emptiedNames.size() < stillListedFiles.size())
             {
-                const bool emptiedAll = emptiedNames.size() >= stillListedFiles.size();
                 cout << endl;
-                if (emptiedAll)
-                {
-                    cout << ">Steam would not remove these entries, but it accepted the empty" << endl;
-                    cout << ">upload: the cloud copies are now 0 B. That is not a conflict - a" << endl;
-                    cout << ">conflicted app refuses the upload too and keeps the old size. Steam" << endl;
-                    cout << ">keeps an entry it cannot remove while another session holds the" << endl;
-                    cout << ">app's cloud slot (a running game, or the Steam client itself), so" << endl;
-                    cout << ">the entry stays listed and empty. Nothing is pending; no restart" << endl;
-                    cout << ">is needed." << endl;
-                }
-                else
-                {
-                    cout << ">Steam refused to delete them. A conflicted cloud sync looks like" << endl;
-                    cout << ">this, and so does another session holding the game. Steam's log" << endl;
-                    cout << ">may have rotated, so the game list cannot always warn you." << endl;
-                    offerConflictRestart(game.appId, steamRoot, userId, personaName, false);
-                }
-                cout << endl;
+                offerConflictRestart(game.appId, steamRoot, userId, personaName, false);
             }
             continue;
         }
 
-        cout << ">Done: " << attemptedCount << " cloud file(s) deleted from app " << game.appId
-             << "." << endl;
-        cout << ">Steam uploads them in the background now, so the game stays in the list" << endl;
-        cout << ">marked [Currently Deleting] until the account shows it empty." << endl;
-        printPerFileSummary();
+        cout << ">Success" << endl;
 
         if (!allUfsFiles.empty())
         {
@@ -4446,10 +4189,6 @@ void CloudDataDeleter::run(const string &steamRoot, const vector<string> &librar
                 if (fs::exists(pathFromUtf8(localPath), ec))
                 {
                     fs::remove(pathFromUtf8(localPath), ec);
-                    if (!ec)
-                    {
-                        cout << ">Removed re-downloaded local copy: " << localPath << endl;
-                    }
                 }
             }
         }

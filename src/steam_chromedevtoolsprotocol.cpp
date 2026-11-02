@@ -1498,7 +1498,7 @@ bool cdpHasCloudFiles(int appId, bool &outHasFiles, string &outError)
     outError.clear();
     if (appId <= 0)
     {
-        outError = "invalid app id";
+        outError = "invalid App ID";
         return false;
     }
     if (!ensureConnected(outError))
@@ -1622,7 +1622,7 @@ bool cdpFetchCloudFiles(int appId, vector<CdpCloudFile> &outFiles, string &outEr
     outError.clear();
     if (appId <= 0)
     {
-        outError = "invalid app id";
+        outError = "invalid App ID";
         return false;
     }
     if (!ensureConnected(outError))
