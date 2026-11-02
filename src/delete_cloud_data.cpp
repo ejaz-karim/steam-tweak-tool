@@ -102,6 +102,31 @@ namespace
         DWORD originalMode = 0;
         bool disabled = false;
     };
+
+    class ScopedHandle
+    {
+    public:
+        explicit ScopedHandle(HANDLE value) : handle(value) {}
+
+        ~ScopedHandle()
+        {
+            if (handle != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(handle);
+            }
+        }
+
+        ScopedHandle(const ScopedHandle &) = delete;
+        ScopedHandle &operator=(const ScopedHandle &) = delete;
+
+        HANDLE get() const
+        {
+            return handle;
+        }
+
+    private:
+        HANDLE handle = INVALID_HANDLE_VALUE;
+    };
 #endif
 
     bool isAllDigits(const string &text)
@@ -2572,14 +2597,14 @@ namespace
         startupInfo.cb = sizeof(startupInfo);
 
         SECURITY_ATTRIBUTES inherit = {sizeof(inherit), nullptr, TRUE};
-        HANDLE nullOut = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr);
-        HANDLE nullErr = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr);
-        if (nullOut != INVALID_HANDLE_VALUE && nullErr != INVALID_HANDLE_VALUE)
+        ScopedHandle nullOut(CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr));
+        ScopedHandle nullErr(CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr));
+        if (nullOut.get() != INVALID_HANDLE_VALUE && nullErr.get() != INVALID_HANDLE_VALUE)
         {
             startupInfo.dwFlags = STARTF_USESTDHANDLES;
             startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-            startupInfo.hStdOutput = nullOut;
-            startupInfo.hStdError = nullErr;
+            startupInfo.hStdOutput = nullOut.get();
+            startupInfo.hStdError = nullErr.get();
         }
         PROCESS_INFORMATION processInfo;
         ZeroMemory(&processInfo, sizeof(processInfo));
@@ -2603,14 +2628,6 @@ namespace
         exitCode = static_cast<int>(workerExitCode);
         CloseHandle(processInfo.hThread);
         CloseHandle(processInfo.hProcess);
-        if (nullOut != INVALID_HANDLE_VALUE)
-        {
-            CloseHandle(nullOut);
-        }
-        if (nullErr != INVALID_HANDLE_VALUE)
-        {
-            CloseHandle(nullErr);
-        }
         return true;
     }
 #endif
