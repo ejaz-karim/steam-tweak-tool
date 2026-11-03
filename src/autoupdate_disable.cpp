@@ -1,8 +1,6 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <algorithm>
-#include <filesystem>
 #include <string>
 #include "steam-tweak-tool/autoupdate_disable.hpp"
 #include "steam-tweak-tool/utility.hpp"

@@ -15,7 +15,6 @@
 #define NOMINMAX
 #include <windows.h>
 #include <tlhelp32.h>
-#include <urlmon.h>
 #include <system_error>
 #endif
 
