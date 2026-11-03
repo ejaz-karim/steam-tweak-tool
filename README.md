@@ -1,6 +1,6 @@
 # Steam Tweak Tool
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/ejaz-karim/steam-tweak-tool/total?label=Total%20Downloads&color=blue)
 
-## Introduction
 Steam Tweak Tool is a command-line tool for managing game updates and cloud data for the Steam Client.
 
 ## Features
