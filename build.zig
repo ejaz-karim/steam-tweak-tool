@@ -4,6 +4,14 @@ const targets: []const std.Target.Query = &.{
     .{ .os_tag = .windows, .cpu_arch = .x86_64, .abi = .gnu },
 };
 
+const project_name = "steam-tweak-tool";
+
+const version = "2.0.0";
+
+const platform_name = "windows";
+
+const arch_name = "x64";
+
 const sources: []const []const u8 = &.{
     "src/autoupdate_disable.cpp",
     "src/cloud_disable.cpp",
@@ -43,7 +51,12 @@ pub fn build(b: *std.Build) void {
             .root_module = exe_mod,
         });
 
-        const installDirName = b.fmt("{s}-{s}", .{ @tagName(query.cpu_arch.?), @tagName(query.os_tag.?) });
+        const installDirName = b.fmt("{s}_{s}_{s}_{s}", .{
+            project_name,
+            version,
+            platform_name,
+            arch_name,
+        });
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{
